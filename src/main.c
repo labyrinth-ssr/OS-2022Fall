@@ -22,18 +22,15 @@ void define_early_init() {
 }
 
 void define_init(){
-    for (int i = 0; i <HELLO_SIZE; i++)
-    {
+    for (int i = 0; i <HELLO_SIZE; i++){
         uart_put_char (hello[i]);
     }
-    
 }
 
 
 NO_RETURN void main()
 {
-    if (cpuid()==0)
-    {
+    if (cpuid()==0){
         do_early_init();
         do_init(); 
         init_bss();
