@@ -10,10 +10,9 @@ static char hello[HELLO_SIZE];
 extern char edata[],end[];
 
 void init_bss(){
-    for (u64* p = (u64*)&edata; p < (u64*)&end; p++){
-        memset(p,0,sizeof(u64));
-    }
+    memset(edata,0,(usize)(end-edata));
 }
+    
 
 void define_early_init() {
 
