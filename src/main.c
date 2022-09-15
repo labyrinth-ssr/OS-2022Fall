@@ -4,9 +4,8 @@
 #include <common/string.h>
 #include <common/defines.h>
 
-#define HELLO_SIZE 16
 
-static char hello[HELLO_SIZE];
+static char hello[16];
 extern char edata[],end[];
 
 void init_bss(){
@@ -14,16 +13,18 @@ void init_bss(){
 }
     
 
-void define_early_init() {
+define_early_init (hello){
 
-    strncpy (hello,"hello world!",HELLO_SIZE);
+    strncpy (hello,"hello world!",16);
     
 }
 
-void define_init(){
-    for (int i = 0; i <HELLO_SIZE; i++){
-        uart_put_char (hello[i]);
+define_init (print){
+    for (char* p=hello; *p; p++)
+    {
+        uart_put_char(*p);
     }
+    
 }
 
 
@@ -33,8 +34,6 @@ NO_RETURN void main()
         do_early_init();
         do_init(); 
         init_bss();
-        define_early_init();
-        define_init();
     }
     
     arch_stop_cpu();
