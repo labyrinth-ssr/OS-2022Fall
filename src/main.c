@@ -31,9 +31,9 @@ define_init (print){
 NO_RETURN void main()
 {
     if (cpuid()==0){
+        init_bss();
         do_early_init();
         do_init(); 
-        init_bss();
     }
     
     arch_stop_cpu();
