@@ -5,16 +5,8 @@
 #include <common/defines.h>
 
 static bool boot_secondary_cpus = false;
-
-
-
 static char hello[16];
 extern char edata[],end[];
-
-void init_bss(){
-    memset(edata,0,(usize)(end-edata));
-}
-    
 
 define_early_init (hello){
 
@@ -27,7 +19,6 @@ define_init (print){
     {
         uart_put_char(*p);
     }
-    
 }
 
 
