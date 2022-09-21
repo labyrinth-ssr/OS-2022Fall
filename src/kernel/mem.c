@@ -4,7 +4,7 @@
 #include <common/list.h>
 #include <driver/memlayout.h>
 
-#define COLOUR_OFF 8
+#define COLOUR_OFF 0
 #define CPU_NUM 4
 
 RefCount alloc_page_cnt;
@@ -46,7 +46,8 @@ typedef struct SlabNode
 {
     int* freelist;
     int colour;
-    int active;
+    unsigned int active;
+    bool is_head;
     ListNode* self;
 }SlabNode;
 
@@ -62,24 +63,36 @@ typedef struct CacheNode {
     unsigned int num;         /* objects per slab */
     int object_size;
     unsigned int colour_off;  /* colour offset */
-    ListNode* slabs_partial;
-    ListNode* slabs_full;
-    ListNode* slabs_free;
+    SlabNode* slabs_partial;
+    SlabNode* slabs_full;
+    SlabNode* slabs_free;
     Array_cache_t array_cache[CPU_NUM];
     ListNode* self;
 }CacheNode;
 
-//set colour = 0 first
+//set colour = 0
+//first means a cache node's first slab, save cache data (slab descripter data)
 void init_slab_node(SlabNode* slab_node,int obj_num,bool first,isize size){
     slab_node->active=0;
     //add meta data while keep alignment.
     int offset=first? sizeof(CacheNode)/size+1 :0;
     slab_node->colour=0;
+    slab_node->is_head=true;
     for (int i = 0; i < obj_num; i++)
     {
         slab_node->freelist[i]=i+offset;
     }
+    slab_node->self=(ListNode*)slab_node;
     init_list_node(slab_node->self);
+}
+
+SlabNode* search_slab_head(SlabNode* p){
+    while (p->self->prev != p->self)
+    {
+        ;
+    }
+    return (SlabNode*)p->self;
+    
 }
 
 //must ensure the slab is not full
@@ -92,68 +105,140 @@ int get_obj_index(SlabNode* slab_node,isize size,int obj_num,void* obj_addr){
     return ((u64)obj_addr-sizeof(int)*obj_num-slab_node->colour-(u64)slab_node)/size;
 }
 
-void add_to_cache_queue(CacheNode** head,isize size,CacheNode* cache_node){
+void add_to_cache_queue(CacheNode* head,isize size,CacheNode* cache_node){
     cache_node->pgorder=0;
     cache_node->colour_off=COLOUR_OFF;
     cache_node->num=(PAGE_SIZE-3*COLOUR_OFF)/size;
-    cache_node->slabs_partial=NULL;
-    cache_node->slabs_full=NULL;
-    cache_node->slabs_free=NULL;
+    cache_node->slabs_partial=(SlabNode*)cache_node;
+    cache_node->slabs_full=cache_node->slabs_partial+1;
+    cache_node->slabs_free=cache_node->slabs_partial+1;
     for (int i = 0; i < CPU_NUM; i++)
     {
         cache_node->array_cache->limit=3;
         cache_node->array_cache->avail=0;
         cache_node->array_cache->entry=NULL;
     }
-    auto free_head=(SlabNode*)kalloc_page();
-    init_slab_node(free_head,cache_node->num,true,size);
-    kmem_cache->slabs_partial=free_head;
-    cache_node->self= free_head;
+
+    cache_node->self= (ListNode*)cache_node;
+    _insert_into_list(head->self,cache_node->self);
+
 }
 
-static CacheNode* kmem_cache;
+static CacheNode* kmem_cache_head;
+
+CacheNode* search_cache_size(CacheNode* head,isize size){
+    auto p=head;
+    auto listp=p->self;
+    (void)listp;
+    _for_in_list(listp,head->self){
+        if (((CacheNode*)listp)->object_size==size)
+        {
+            return (CacheNode*) listp;
+        }
+    }
+    return NULL;
+}
 
 //objects in the middle be freed
 void* kalloc(isize size)
 {
     void* objp;
-    Array_cache_t* ac=&(kmem_cache->array_cache[cpuid()]);
-    if (ac->avail!=0)
+    auto kmem_cache=search_cache_size(kmem_cache_head,size);
+    if (NULL != kmem_cache)
     {
-        objp=ac->entry[--ac->avail];
-        return objp;
-    }
+        Array_cache_t* ac=&(kmem_cache->array_cache[cpuid()]);
+        if (ac->avail!=0)
+        {
+            objp=ac->entry[--ac->avail];
+            return objp;
+        }
 
-    //avail is zero,refill the entry from global
-    if (NULL!=kmem_cache->slabs_partial)
-    {
-        ac->entry[ac->avail++]=alloc_obj(kmem_cache->slabs_partial,size,kmem_cache->num);
-        return ac->entry[--ac->avail];
-    }
+        //avail is zero,refill the entry from global
+        if (NULL!=kmem_cache->slabs_partial)
+        {
+            auto ret=alloc_obj(kmem_cache->slabs_partial,size,kmem_cache->num);
 
-    //no partial slabs
-    if (NULL!=kmem_cache->slabs_free)
-    {
-        ac->entry[ac->avail++]=alloc_obj(kmem_cache->slabs_free,size,kmem_cache->num);
-        return ac->entry[--ac->avail];
+            if (kmem_cache->slabs_partial->active+1==kmem_cache->num)
+            {
+
+                auto partial_head=kmem_cache->slabs_partial;
+                if (NULL==kmem_cache->slabs_full)
+                {
+                    kmem_cache->slabs_full=partial_head;
+                    init_list_node(kmem_cache->slabs_full->self);
+                } else
+                {
+                    _insert_into_list(kmem_cache->slabs_full->self,kmem_cache->slabs_partial->self);
+                }
+                
+                if (_empty_list((ListNode*)kmem_cache->slabs_partial))
+                {
+                    kmem_cache->slabs_partial=NULL;
+                } else
+                {
+                    kmem_cache->slabs_partial=(SlabNode*)_detach_from_list(kmem_cache->slabs_partial->self);
+                }
+            }
+
+            return ret;
+        }
+
+        //no partial slabs
+        if (NULL!=kmem_cache->slabs_free)
+        {
+            auto ret=alloc_obj(kmem_cache->slabs_partial,size,kmem_cache->num);
+            auto free_head=kmem_cache->slabs_free;
+                if (NULL==kmem_cache->slabs_partial)
+                {
+                    kmem_cache->slabs_partial=free_head;
+                    init_list_node(kmem_cache->slabs_partial->self);
+
+                } else
+                {
+                    _insert_into_list(kmem_cache->slabs_partial->self,kmem_cache->slabs_free->self);
+                }
+                if (_empty_list(kmem_cache->slabs_free->self))
+                {
+                    kmem_cache->slabs_free=NULL;
+                } else
+                {
+                    kmem_cache->slabs_free=(SlabNode*)_detach_from_list(kmem_cache->slabs_partial->self);
+                }
+
+            return ret;
+        }
+
+        //no free slabs
+        auto free_head=(SlabNode*)kalloc_page();
+        init_slab_node(free_head,kmem_cache->num,true,size);
+        kmem_cache->slabs_partial=free_head;
+        init_list_node(kmem_cache->slabs_partial->self);
     }
 
     //queuenode is concurrency secure, no need clock. level3, allocate slab
     auto free_head=(SlabNode*)kalloc_page();
-    init_slab_node(free_head,kmem_cache->num,true,size);
-    kmem_cache->slabs_partial=free_head;
+    auto num=(PAGE_SIZE-3*COLOUR_OFF)/size;
+    add_to_cache_queue(kmem_cache_head,size,(CacheNode*)free_head);
+    init_slab_node(free_head,num,true,size);
+
     return alloc_obj(free_head,size,kmem_cache->num);
 
 }
 
 //find in the global slab: full or partial. from different slabs.kmem_cache 
 void cache_flusharray(Array_cache_t* ac,CacheNode* cache_node){
-    SlabNode* flush_slab= PAGE_BASE((u64)(ac->entry[ac->avail]));
+    SlabNode* flush_slab= (SlabNode*) PAGE_BASE((u64)(ac->entry[ac->avail]));
     flush_slab->freelist[--flush_slab->active]=get_obj_index(flush_slab,cache_node->object_size,cache_node->num,ac->entry[ac->avail]);
 }
 
 void kfree(void* p)
 {
+
+    SlabNode* owner_slab=(SlabNode*) PAGE_BASE((u64)p);
+
+    auto slab_head=search_slab_head(owner_slab);
+    auto kmem_cache= (CacheNode*)slab_head;
+    
     Array_cache_t* ac=&(kmem_cache->array_cache[cpuid()]);
 
     if (ac->avail==ac->limit)
