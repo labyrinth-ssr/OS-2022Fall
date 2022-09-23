@@ -138,8 +138,14 @@ void* alloc_obj (SlabNode* slab_node,isize size,int obj_num){
 //         printk("cpu %d : freelist member %d\n",cpuid(),slab_node->freelist[i]);
 //    }
     // printk("cpu %d , colour: %d",cpuid(),slab_node->colour);
+    if (obj_num==1)
+    {
+        slab_node->active++;
+        return (void*)((u64)slab_node+PAGE_SIZE/2);
+    }
     
-    return obj_num==1? (void*)((u64)slab_node+PAGE_SIZE/2) : (void*)((u64)slab_node+sizeof(SlabNode)+(slab_node->freelist[slab_node->active++])*size+slab_node->colour+ (sizeof(int)*obj_num/8+1)*8 );
+    
+    return (void*)((u64)slab_node+sizeof(SlabNode)+(slab_node->freelist[slab_node->active++])*size+slab_node->colour+ (sizeof(int)*obj_num/8+1)*8 );
 }
 
 int get_obj_index(SlabNode* slab_node,isize size,int obj_num,void* obj_addr){
@@ -304,10 +310,10 @@ void* kalloc(isize size)
 
                             if (PAGE_BASE((u64)ret)!=PAGE_BASE((u64)free_head))
             {
-                // printk("cpu %d in partial not in one page slabnode: %p,ret %p\n",cpuid(),free_head,ret);
+               // printk("cpu %d in partial not in one page slabnode: %p,ret %p\n",cpuid(),free_head,ret);
             } else
             {
-                // printk("cpu %d in partial within one page\n",cpuid());
+                //printk("cpu %d in partial within one page\n",cpuid());
             }
         if (offset_node->slabs_partial->active>=offset_node->num)
         {
@@ -334,7 +340,7 @@ void* kalloc(isize size)
             
             if (PAGE_BASE((u64)ret)!=PAGE_BASE((u64)(kmem_cache->slabs_partial)))
             {
-                //printk("cpu %d in partial not in one page slabnode: %p,ret %p\n",cpuid(),kmem_cache->slabs_partial,ret);
+               // printk("cpu %d in partial not in one page slabnode: %p,ret %p\n",cpuid(),kmem_cache->slabs_partial,ret);
             } else
             {
                 //printk("cpu %d in partial within one page\n",cpuid());
@@ -380,10 +386,10 @@ void* kalloc(isize size)
 
                     if (PAGE_BASE((u64)ret)!=PAGE_BASE((u64)(kmem_cache->slabs_partial)))
             {
-                // printk("cpu %d in partial not in one page slabnode: %p,ret %p\n",cpuid(),kmem_cache->slabs_partial,ret);
+               // printk("cpu %d in partial not in one page slabnode: %p,ret %p\n",cpuid(),kmem_cache->slabs_partial,ret);
             } else
             {
-                // printk("cpu %d in partial within one page\n",cpuid());
+                //printk("cpu %d in partial within one page\n",cpuid());
             }
 
         if (kmem_cache->slabs_partial->active==kmem_cache->num)
@@ -434,7 +440,7 @@ void kfree(void* p)
     // printk("cpu %d avail %d",cpuid(),ac->avail);
     ac->entry[ac->avail] = p;
     ac->avail++;
-        release_spinlock(two,&mem_lock2);
+    release_spinlock(two,&mem_lock2);
 
 
 }

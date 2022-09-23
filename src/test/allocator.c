@@ -66,7 +66,7 @@ void alloc_test() {
             }
             sz[i][j] = z;
             p[i][j] = kalloc(z);
-            printk("cpu %d finish alloc %d\n",cpuid(),z);
+            // printk("finish alloc %p memset %d size: %d\n",p[i][j],i ^ z,z);
             u64 q = (u64)p[i][j];
             if (p[i][j] == NULL || ((z & 1) == 0 && (q & 1) != 0) ||
                 ((z & 3) == 0 && (q & 3) != 0) ||
@@ -82,10 +82,11 @@ void alloc_test() {
                 FAIL("FAIL: block[%d][%d] null\n", i, k);
             int m = (i ^ sz[i][k]) & 255;
             for (int t = 0; t < sz[i][k]; t++)
-                if (((u8*)p[i][k])[t] != m)
-                    FAIL("FAIL: block[%d][%d] wrong\n", i, k);
+                if (((u8*)p[i][k])[t] != m){
+                    FAIL("FAIL: block[%d][%d] wrong\n content %d, golden:%d , addr %p\n",i, k,((u8*)p[i][k])[t],m,&(((u8*)p[i][k])[t]));
+                }
             kfree(p[i][k]);
-            printk("cpu %d freed\n",cpuid());
+            // printk("cpu %d freed\n",cpuid());
             p[i][k] = p[i][--j];
             sz[i][k] = sz[i][j];
         }
