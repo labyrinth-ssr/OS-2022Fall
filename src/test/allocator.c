@@ -83,7 +83,7 @@ void alloc_test() {
             int m = (i ^ sz[i][k]) & 255;
             for (int t = 0; t < sz[i][k]; t++)
                 if (((u8*)p[i][k])[t] != m){
-                    FAIL("FAIL: block[%d][%d] wrong\n content %d, golden:%d , addr %p\n",i, k,((u8*)p[i][k])[t],m,&(((u8*)p[i][k])[t]));
+                    FAIL("FAIL: block[%d][%d] wrong\n content %d, golden:%d , addr %p,save size %d\n",i, k,((u8*)p[i][k])[t],m,&(((u8*)p[i][k])[t]),sz[i][k]);
                 }
             kfree(p[i][k]);
             // printk("cpu %d freed\n",cpuid());
