@@ -1,6 +1,6 @@
 #include <common/list.h>
 
-void init_list_node(ListNode *node) {
+void  init_list_node(ListNode *node) {
     node->prev = node;
     node->next = node;
 }
