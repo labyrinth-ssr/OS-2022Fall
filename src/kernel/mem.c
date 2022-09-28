@@ -81,7 +81,6 @@ typedef struct CacheNode {
     SlabNode* slabs_free;
 }CacheNode;
 
-//set colour = 0
 //first means a cache node's first slab, save cache data (slab descripter data)
 void init_slab_node(SlabNode* slab_node,int obj_num,bool first,CacheNode* owner_cache){
     slab_node->active=0;
@@ -106,7 +105,7 @@ int get_obj_index(SlabNode* slab_node,isize size,int obj_num,void* obj_addr){
 }
 
 //head can be null
-void add_to_cache_queue(CacheNode* head,isize size,CacheNode* cache_node,bool first_node,int num,SlabNode* slabs_partial){
+void init_cache_node(isize size,CacheNode* cache_node,int num,SlabNode* slabs_partial){
     cache_node->pgorder=0;
     cache_node->object_size=size;
     cache_node->colour_off=COLOUR_OFF;
@@ -122,16 +121,10 @@ void add_to_cache_queue(CacheNode* head,isize size,CacheNode* cache_node,bool fi
             cache_node->array_cache[i].entry[j]= 0;
         }
     }
-    if (first_node)
-    {
-        init_list_node((ListNode*)cache_node);
-    } else
-    {
-        _insert_into_list((ListNode*)head,(ListNode*)cache_node);
-    }
+    init_list_node((ListNode*)cache_node);
 }
 
-static CacheNode* kmem_cache_head;
+static CacheNode* kmem_cache_array[2048];
 
 CacheNode* search_cache_size(CacheNode* head,isize size){
     auto listp=(ListNode*)head;
@@ -200,24 +193,16 @@ void* kalloc(isize size)
 {
     setup_checker(one);
     acquire_spinlock(one,&mem_lock);
-    //printk("cpu %d kalloc %lld",cpuid(),size);
     void* objp;
-    CacheNode* search_res=NULL;
-    if (NULL!=kmem_cache_head)
-    {
-        search_res=search_cache_size(kmem_cache_head,size);
-    } 
-    if (NULL==kmem_cache_head||NULL== search_res)
+    CacheNode* search_res=kmem_cache_array[size];
+    if (NULL== search_res)
     {
         auto free_head=(SlabNode*)kalloc_page();
         auto num=(PAGE_SIZE-3*COLOUR_OFF-sizeof(SlabNode)-8-sizeof(CacheNode))/(size+sizeof(int));
         init_slab_node(free_head,num,true,NULL);
         CacheNode* offset_node =(CacheNode*)((u64)free_head+PAGE_SIZE-sizeof(CacheNode));
-        if (NULL==kmem_cache_head)
-        {
-            kmem_cache_head=offset_node;
-        } 
-        add_to_cache_queue(kmem_cache_head,size,offset_node,NULL==kmem_cache_head,num,free_head);
+        kmem_cache_array[size]=offset_node;
+        init_cache_node(size,offset_node,num,free_head);
         auto ret=alloc_obj(free_head,size,num);
         if (offset_node->slabs_partial->active>=offset_node->num)
         {
