@@ -84,7 +84,6 @@ typedef struct CacheNode {
 //set colour = 0
 //first means a cache node's first slab, save cache data (slab descripter data)
 void init_slab_node(SlabNode* slab_node,int obj_num,bool first,CacheNode* owner_cache){
-
     slab_node->active=0;
     slab_node->colour=0;
     slab_node->owner_cache= first? (void*)((u64)slab_node+PAGE_SIZE-sizeof(CacheNode)):owner_cache;
@@ -98,7 +97,6 @@ void init_slab_node(SlabNode* slab_node,int obj_num,bool first,CacheNode* owner_
 
 //must ensure the slab is not full
 void* alloc_obj (SlabNode* slab_node,isize size,int obj_num){
-    //printk("cpu %d kalloc %lld in alloc obj : %d addr: %p\n",cpuid(),size,slab_node->active,slab_node);
     auto ret=(void*)((u64)slab_node+sizeof(SlabNode)+ (sizeof(int)*obj_num/8+1)*8+slab_node->colour+(slab_node->freelist[slab_node->active++])*size );
     return ret;
 }
@@ -172,6 +170,7 @@ void partial_to_full(CacheNode* kmem_cache,SlabNode* partial_slab){
 }
 
 void partial_to_free(CacheNode* kmem_cache,SlabNode* partial_slab){
+    // printk("partial to free\n");
     kmem_cache->slabs_partial=  (SlabNode*)_detach_from_list((ListNode*)partial_slab);
     if (NULL==kmem_cache->slabs_free)
     {
@@ -184,6 +183,7 @@ void partial_to_free(CacheNode* kmem_cache,SlabNode* partial_slab){
 }
 
 void free_to_partial(CacheNode* kmem_cache,SlabNode* free_slab){
+    // printk("free to partial\n");
     kmem_cache->slabs_free=(SlabNode*)_detach_from_list((ListNode*)(free_slab));
     if (NULL==kmem_cache->slabs_partial)
     {
@@ -226,45 +226,45 @@ void* kalloc(isize size)
         release_spinlock(one,&mem_lock);
         return ret;
     }
-        auto kmem_cache=search_res;
-        Array_cache_t* ac=&(kmem_cache->array_cache[cpuid()]);
-        if (ac->avail>0)
-        {
-            objp=ac->entry[--ac->avail];
-            release_spinlock(one,&mem_lock);
-            return objp;
-        }
-        //avail is zero,refill the entry from global
-        if (NULL!=kmem_cache->slabs_partial)
-        {
-            auto ret=alloc_obj(kmem_cache->slabs_partial,size,kmem_cache->num);
-            if (kmem_cache->slabs_partial->active>=kmem_cache->num)
-            {
-                partial_to_full(kmem_cache,kmem_cache->slabs_partial);
-            }
-            release_spinlock(one,&mem_lock);
-            return ret;
-        }
 
-        if (NULL!=kmem_cache->slabs_free)
-        {
-            auto ret=alloc_obj(kmem_cache->slabs_free,size,kmem_cache->num);
-            free_to_partial(kmem_cache,kmem_cache->slabs_free);
-            release_spinlock(one,&mem_lock);
-            return ret;
-        }
-        
-        auto free_head=kalloc_page();
-            //printk("cpu %d size :%lld fetch partial %p ",cpuid(),kmem_cache->object_size,free_head);
-        init_slab_node((SlabNode*) free_head,kmem_cache->num,false,kmem_cache);
-        kmem_cache->slabs_partial=(SlabNode*) free_head;
+    auto kmem_cache=search_res;
+    Array_cache_t* ac=&(kmem_cache->array_cache[cpuid()]);
+    if (ac->avail>0)
+    {
+        objp=ac->entry[--ac->avail];
+        release_spinlock(one,&mem_lock);
+        return objp;
+    }
+    //avail is zero,refill the entry from global
+    if (NULL!=kmem_cache->slabs_partial)
+    {
         auto ret=alloc_obj(kmem_cache->slabs_partial,size,kmem_cache->num);
         if (kmem_cache->slabs_partial->active>=kmem_cache->num)
         {
-                partial_to_full(kmem_cache,kmem_cache->slabs_partial);
+            partial_to_full(kmem_cache,kmem_cache->slabs_partial);
         }
         release_spinlock(one,&mem_lock);
         return ret;
+    }
+
+    if (NULL!=kmem_cache->slabs_free)
+    {
+        auto ret=alloc_obj(kmem_cache->slabs_free,size,kmem_cache->num);
+        free_to_partial(kmem_cache,kmem_cache->slabs_free);
+        release_spinlock(one,&mem_lock);
+        return ret;
+    }
+    
+    auto free_head=kalloc_page();
+    init_slab_node((SlabNode*) free_head,kmem_cache->num,false,kmem_cache);
+    kmem_cache->slabs_partial=(SlabNode*) free_head;
+    auto ret=alloc_obj(kmem_cache->slabs_partial,size,kmem_cache->num);
+    if (kmem_cache->slabs_partial->active>=kmem_cache->num)
+    {
+            partial_to_full(kmem_cache,kmem_cache->slabs_partial);
+    }
+    release_spinlock(one,&mem_lock);
+    return ret;
 }
 
 //find in the global slab: full or partial. from different slabs.kmem_cache 
