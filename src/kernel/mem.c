@@ -278,5 +278,10 @@ void kfree(void* p)
         cache_flusharray(ac,kmem_cache);
     }
     ac->entry[ac->avail++] = p;
+    if (ac->avail==0 && NULL==kmem_cache->slabs_full && NULL==kmem_cache->slabs_partial )
+    {
+        kfree_page((void*)PAGE_BASE((u64)p));
+    }
+    
     release_spinlock(one,&mem_lock);
 }
