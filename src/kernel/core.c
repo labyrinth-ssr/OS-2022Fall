@@ -3,16 +3,25 @@
 #include <kernel/init.h>
 #include <kernel/sched.h>
 #include <test/test.h>
-#include <driver/sd.h>
+// #include <driver/sd.h>
 
 bool panic_flag;
 
 NO_RETURN void idle_entry() {
-    set_cpu_on();
+    if (cpuid()==0)
+    {
+        set_cpu_on();
+
+    }else
+    {
+        arch_stop_cpu();
+    }
     while (1) {
         yield();
-        if (panic_flag)
+        if (panic_flag){
+            printk("panic\n");
             break;
+        }
         arch_with_trap {
             arch_wfi();
         }

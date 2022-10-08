@@ -50,6 +50,7 @@ bool wait_sem(Semaphore* sem)
     WaitData* wait = kalloc(sizeof(WaitData));
     wait->proc = thisproc();
     wait->up = false;
+    printk("%d wait ,lr: %llx\n",thisproc()->pid,thisproc()->kcontext->lr);
     _insert_into_list(&sem->sleeplist, &wait->slnode);
     lock_for_sched(0);
     release_spinlock(0, &sem->lock);

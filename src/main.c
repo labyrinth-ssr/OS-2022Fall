@@ -9,9 +9,7 @@ static char hello[16];
 extern char edata[],end[];
 
 define_early_init (hello){
-
     strncpy (hello,"hello world!",16);
-    
 }
 
 define_init (print){
@@ -20,7 +18,6 @@ define_init (print){
         uart_put_char(*p);
     }
 }
-
 
 NO_RETURN void idle_entry();
 
@@ -32,7 +29,6 @@ void kernel_init()
     do_init();
     boot_secondary_cpus = true;
 }
-
 
 void main()
 {

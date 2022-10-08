@@ -22,7 +22,7 @@ void trap_global_handler(UserContext* context)
     {
         case ESR_EC_UNKNOWN:
         {
-            if (ir)
+            if (ir) 
                 PANIC();
             else
                 interrupt_global_handler();

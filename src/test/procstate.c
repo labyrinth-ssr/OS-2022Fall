@@ -30,7 +30,10 @@ static void proc_test_1b(u64 a)
             wait_sem(&s2);
         break;
     case 8: wait_sem(&s3); post_sem(&s4); break;
-    case 9: post_sem(&s5); wait_sem(&s6); break;
+    case 9: {
+        post_sem(&s5); 
+        wait_sem(&s6);
+        } break;
     }
     exit(a);
 }
@@ -112,7 +115,9 @@ static void proc_test_1()
     for (int i = 0; i < 10; i++)
     {
         int code, id;
+        printk("a ");
         id = wait(&code);
+        // printk("b ");
         ASSERT(pid[code] == id);
         printk("proc %d exit\n", code);
     }
