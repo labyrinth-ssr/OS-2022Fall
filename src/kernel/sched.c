@@ -74,6 +74,7 @@ bool activate_proc(struct proc* p)
     // if the proc->state if SLEEPING/UNUSED, set the process state to RUNNABLE and add it to the sched queue
     // else: panic
     _acquire_sched_lock();
+    printk("activate process %d\n",p->pid);
     if (p->state == RUNNING || p->state == RUNNABLE)
     {
         _release_sched_lock();
@@ -81,25 +82,8 @@ bool activate_proc(struct proc* p)
     }
     if (p->state == SLEEPING || p->state == UNUSED)
     {
-                if (p->state==SLEEPING)
-        {
-            printk("sleep awake\n");
-        }
-        else
-        {
-            printk("unused activate\n");
-        }
         p->state = RUNNABLE;
-        printk("\n");
         _insert_into_list(&rq, &p->schinfo.rq);
-        printk("insert into rq %d\n",p->pid);
-
-        printk("pid:%d lr: %llx\n",p->pid,p->kcontext->lr);
-        _for_in_list(rqe,&rq){
-            auto process=container_of(rqe,struct proc,schinfo.rq);
-            printk("pid: %d ",process->pid);
-        }
-        printk("\n");
     }
     else
     {
@@ -114,18 +98,12 @@ static void update_this_state(enum procstate new_state)
 {
     // TODO: if using simple_sched, you should implement this routinue
     // update the state of current process to new_state, and remove it from the sched queue if new_state=SLEEPING/ZOMBIE
-    thisproc()->state = new_state;
+    auto this=thisproc();
+    this->state = new_state;
     if (new_state == SLEEPING || new_state == ZOMBIE)
     {
-        _detach_from_list(&thisproc()->schinfo.rq);
-        printk("%d sleeping or zombie, lr : %llx\n",thisproc()->pid,thisproc()->kcontext->lr);
-        // _for_in_list(rqe,&rq){
-        //     auto process=container_of(rqe,struct proc,schinfo.rq);
-        //     printk("pid: %d ",process->pid);
-        // }
-        // printk("\n");
+        _detach_from_list(&this->schinfo.rq);
     }
-        // _insert_into_list(&rq, &p->schinfo.rq);
 }
 
 static struct proc* pick_next()
@@ -136,18 +114,14 @@ static struct proc* pick_next()
     {
         return cpus[cpuid()].sched.idle;
     }
-    int cnt=0;
     _for_in_list(p, &rq){
         if (p == &rq)
         {
-            cnt+=1;
             continue;
         }
-        cnt +=1;
         auto proc = container_of(p, struct proc, schinfo.rq);
-        if (proc->state == RUNNABLE && (ListNode*)proc != p)
+        if (proc->state == RUNNABLE )
         {
-            // printk("next is %p",proc);
             return proc;
         } 
     }
@@ -169,14 +143,34 @@ static void simple_sched(enum procstate new_state)
     auto cpu_id=cpuid();
     (void)cpu_id;
     auto this = thisproc();
-    printk("this process %d\n",this->pid);
-    ASSERT(this->state == RUNNING);
+    ASSERT(this->state == RUNNING || this->state==ZOMBIE);
     update_this_state(new_state);
+    if (new_state==UNUSED)
+    {
+        printk("sched: %d unused\n",this->pid);
+    }
+    else if (new_state==RUNNABLE)
+    {
+        printk("sched: %d runnable\n",this->pid);
+    }
+    else if (new_state==RUNNING)
+    {
+        printk("sched: %d running\n",this->pid);
+    }
+    else if (new_state==SLEEPING)
+    {
+        printk("sched: %d sleeping\n",this->pid);
+    }
+    else
+    {
+        printk("sched: %d zombie\n",this->pid);
+    }
+    
     auto next = pick_next();
     update_this_proc(next);
-    printk("next process %d\n",next->pid);
     ASSERT(next->state == RUNNABLE);
     next->state = RUNNING;
+    printk("%d running\n",next->pid);
     if (next != this)
     {
         swtch(next->kcontext, &this->kcontext);

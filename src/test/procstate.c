@@ -115,9 +115,7 @@ static void proc_test_1()
     for (int i = 0; i < 10; i++)
     {
         int code, id;
-        printk("a ");
         id = wait(&code);
-        // printk("b ");
         ASSERT(pid[code] == id);
         printk("proc %d exit\n", code);
     }
@@ -129,11 +127,13 @@ void proc_test()
     printk("proc_test\n");
     auto p = create_proc();
     int pid = start_proc(p, proc_test_1, 0);
+    printk("pid: %d\n",pid);
     int t = 0;
     while (1)
     {
         int code;
         int id = wait(&code);
+        printk("code:%d",code);
         if (id == -1)
             break;
         if (id == pid)
@@ -141,6 +141,7 @@ void proc_test()
         else
             t |= 1 << (code - 20);
     }
+    printk("t :%d\n",t);
     ASSERT(t == 1048575);
     printk("proc_test PASS\n");
-}
+} 
