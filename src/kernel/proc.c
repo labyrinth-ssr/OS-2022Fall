@@ -41,7 +41,6 @@ void set_parent_to_this(struct proc* proc)
     auto this=thisproc();
     proc->parent=thisproc();
     _insert_into_list(&this->children,&proc->ptnode);
-    printk("%d is %d 's parent\n",thisproc()->pid,proc->pid);
     _release_spinlock(&plock);
 }
 
@@ -57,6 +56,7 @@ NO_RETURN void exit(int code)
     setup_checker(0);
     _acquire_spinlock(&plock);
     auto this = thisproc();
+    printk("cpu %d, %d exit\n",cpuid(),this->pid);
     this->exitcode = code;
     if (!_empty_list(&this->children))
     {
@@ -67,7 +67,6 @@ NO_RETURN void exit(int code)
     post_sem(&this->parent->childexit);
     lock_for_sched(0);
     _release_spinlock(&plock);
-    printk("%d exit\n",this->pid);
     sched(0,ZOMBIE);
     PANIC(); // prevent the warning of 'no_return function returns'
 }
@@ -78,8 +77,8 @@ int wait(int* exitcode)
     // 2. wait for childexit
     // 3. if any child exits, clean it up and return its pid and exitcode
     // NOTE: be careful of concurrency
+    _acquire_spinlock(&plock);
     auto this = thisproc();
-    printk("%d wait\n",this->pid);
     bool all_zombie=false;
     if (this->pid==2)
     {
@@ -93,17 +92,18 @@ int wait(int* exitcode)
             if (child->state!=ZOMBIE)
             {
                 all_zombie=false;
-                printk("root_proc child %d zombie \n",child->pid);
             }
         }
     }
     (void)all_zombie;
     if (_empty_list(&this->children))
     {
+        _release_spinlock(&plock);
         return -1;
     }
     if (!all_zombie)
     {
+        _release_spinlock(&plock);
         wait_sem(&this->childexit);
     }
     
@@ -112,14 +112,14 @@ int wait(int* exitcode)
         if (child->state==ZOMBIE)
         {
             auto pid=child->pid;
-            printk("child exitcode:%d\n",child->exitcode);
             *exitcode=child->exitcode;
             _detach_from_list(&child->ptnode);
-            printk("%d child %d free\n",this->pid,child->pid);
             kfree(child);
+            _release_spinlock(&plock);
             return pid;
         }
     }
+    // _release_spinlock(&plock);
     PANIC();
 }
 

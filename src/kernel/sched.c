@@ -12,11 +12,13 @@ extern bool panic_flag;
 extern void swtch(KernelContext* new_ctx, KernelContext** old_ctx);
 
 static SpinLock rqlock;
+static SpinLock cllock;
 static ListNode rq;
 extern bool panic_flag;
 
 define_early_init(rq){
     init_spinlock(&rqlock);
+    init_spinlock(&cllock);
     init_list_node(&rq);
 }
 
@@ -74,7 +76,6 @@ bool activate_proc(struct proc* p)
     // if the proc->state if SLEEPING/UNUSED, set the process state to RUNNABLE and add it to the sched queue
     // else: panic
     _acquire_sched_lock();
-    printk("activate process %d\n",p->pid);
     if (p->state == RUNNING || p->state == RUNNABLE)
     {
         _release_sched_lock();
@@ -122,6 +123,7 @@ static struct proc* pick_next()
         auto proc = container_of(p, struct proc, schinfo.rq);
         if (proc->state == RUNNABLE )
         {
+            printk("cpu %d , pick next runnable %d \n",cpuid(),proc->pid);
             return proc;
         } 
     }
@@ -140,37 +142,15 @@ static void update_this_proc(struct proc* p)
 // You are allowed to replace it with whatever you like.
 static void simple_sched(enum procstate new_state)
 {
-    auto cpu_id=cpuid();
-    (void)cpu_id;
+    printk("cpu %d sched %d , splinlock\n",cpuid(),thisproc()->pid);
     auto this = thisproc();
     ASSERT(this->state == RUNNING || this->state==ZOMBIE);
     update_this_state(new_state);
-    if (new_state==UNUSED)
-    {
-        printk("sched: %d unused\n",this->pid);
-    }
-    else if (new_state==RUNNABLE)
-    {
-        printk("sched: %d runnable\n",this->pid);
-    }
-    else if (new_state==RUNNING)
-    {
-        printk("sched: %d running\n",this->pid);
-    }
-    else if (new_state==SLEEPING)
-    {
-        printk("sched: %d sleeping\n",this->pid);
-    }
-    else
-    {
-        printk("sched: %d zombie\n",this->pid);
-    }
-    
     auto next = pick_next();
     update_this_proc(next);
+    printk("cpu %d , %d sched to %d, next state %d \n",cpuid(),this->pid,next->pid,next->state);
     ASSERT(next->state == RUNNABLE);
     next->state = RUNNING;
-    printk("%d running\n",next->pid);
     if (next != this)
     {
         swtch(next->kcontext, &this->kcontext);

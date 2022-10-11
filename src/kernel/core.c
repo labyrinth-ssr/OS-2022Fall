@@ -8,22 +8,13 @@
 bool panic_flag;
 
 NO_RETURN void idle_entry() {
-    if (cpuid()==0)
-    {
-        set_cpu_on();
-
-    }else
-    {
-        arch_stop_cpu();
-    }
+    set_cpu_on();
     while (1) {
         yield();
-        if (panic_flag){
-            printk("panic\n");
+        if (panic_flag)
             break;
-        }
         arch_with_trap {
-            arch_wfi();
+            // arch_wfi();
         }
     }
     set_cpu_off();
