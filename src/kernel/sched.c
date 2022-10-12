@@ -115,15 +115,16 @@ static struct proc* pick_next()
     {
         return cpus[cpuid()].sched.idle;
     }
+    int cnt = 0;
     _for_in_list(p, &rq){
         if (p == &rq)
         {
             continue;
         }
         auto proc = container_of(p, struct proc, schinfo.rq);
-        if (proc->state == RUNNABLE )
+        cnt++;
+        if (proc->state == RUNNABLE && (thisproc()->pid ==0 || cnt!=1))
         {
-            printk("cpu %d , pick next runnable %d \n",cpuid(),proc->pid);
             return proc;
         } 
     }
@@ -142,13 +143,11 @@ static void update_this_proc(struct proc* p)
 // You are allowed to replace it with whatever you like.
 static void simple_sched(enum procstate new_state)
 {
-    printk("cpu %d sched %d , splinlock\n",cpuid(),thisproc()->pid);
     auto this = thisproc();
-    ASSERT(this->state == RUNNING || this->state==ZOMBIE);
+    ASSERT(this->state == RUNNING);
     update_this_state(new_state);
     auto next = pick_next();
     update_this_proc(next);
-    printk("cpu %d , %d sched to %d, next state %d \n",cpuid(),this->pid,next->pid,next->state);
     ASSERT(next->state == RUNNABLE);
     next->state = RUNNING;
     if (next != this)

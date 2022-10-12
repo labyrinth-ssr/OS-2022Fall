@@ -5,7 +5,6 @@
 #include <common/list.h>
 #include <common/string.h>
 #include <kernel/printk.h>
-#include <kernel/sched.h>
 
 #define PID_NUM 1000
 
@@ -34,9 +33,6 @@ define_early_init(plock){
 
 void set_parent_to_this(struct proc* proc)
 {
-    // TODO: set the parent of proc to thisproc
-    // NOTE: maybe you need to lock the process tree
-    // NOTE: it's ensured that the old proc->parent = NULL
     _acquire_spinlock(&plock);
     auto this=thisproc();
     proc->parent=thisproc();
@@ -46,17 +42,9 @@ void set_parent_to_this(struct proc* proc)
 
 NO_RETURN void exit(int code)
 {
-    // TODO
-    // 1. set the exitcode
-    // 2. clean up the resources (dont have yet)
-    // 3. transfer children to the root_proc, and notify the root_proc if there is zombie ()
-    // 4. notify the parent_proc the exit
-    // 5. sched(ZOMBIE) 设为zombie ，让调度器调出
-    // NOTE: be careful of concurrency
     setup_checker(0);
     _acquire_spinlock(&plock);
     auto this = thisproc();
-    printk("cpu %d, %d exit\n",cpuid(),this->pid);
     this->exitcode = code;
     if (!_empty_list(&this->children))
     {
@@ -70,19 +58,15 @@ NO_RETURN void exit(int code)
     sched(0,ZOMBIE);
     PANIC(); // prevent the warning of 'no_return function returns'
 }
+
 int wait(int* exitcode)
 {
-    // TODO
-    // 1. return -1 if no children
-    // 2. wait for childexit
-    // 3. if any child exits, clean it up and return its pid and exitcode
-    // NOTE: be careful of concurrency
-    _acquire_spinlock(&plock);
     auto this = thisproc();
     bool all_zombie=false;
     if (this->pid==2)
     {
         all_zombie=true;
+        _acquire_spinlock(&plock);
         _for_in_list(c,&this->children){
             if (c==&this->children)
             {
@@ -94,22 +78,24 @@ int wait(int* exitcode)
                 all_zombie=false;
             }
         }
+        _release_spinlock(&plock);
     }
     (void)all_zombie;
+    _acquire_spinlock(&plock);
     if (_empty_list(&this->children))
     {
         _release_spinlock(&plock);
         return -1;
     }
+    _release_spinlock(&plock);
     if (!all_zombie)
     {
-        _release_spinlock(&plock);
         wait_sem(&this->childexit);
     }
-    
+    _acquire_spinlock(&plock);
     _for_in_list(c,&this->children){
         auto child=container_of(c,struct proc,ptnode);
-        if (child->state==ZOMBIE)
+        if (is_zombie(child))
         {
             auto pid=child->pid;
             *exitcode=child->exitcode;
@@ -119,7 +105,6 @@ int wait(int* exitcode)
             return pid;
         }
     }
-    // _release_spinlock(&plock);
     PANIC();
 }
 

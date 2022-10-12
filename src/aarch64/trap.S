@@ -1,10 +1,8 @@
 #define pushp(a, b) stp a, b, [sp, #-0x10]!
 #define popp(a, b) ldp a, b, [sp], #0x10 
 
-/* `exception_vector.S` send all traps here. */
 .global trap_entry
 trap_entry:
-// TODO
 pushp(x16,x17)
 pushp(x14,x15)
 pushp(x12,x13)
@@ -21,7 +19,6 @@ mov x0, sp
 bl trap_global_handler
 .global trap_return
 trap_return:
-// TODO
 popp(x0,x1)
 msr spsr_el1,x0
 msr elr_el1,x1
