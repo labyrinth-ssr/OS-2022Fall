@@ -54,6 +54,7 @@ NO_RETURN void exit(int code)
     }
     post_sem(&this->parent->childexit);
     lock_for_sched(0);
+    pids.freelist[--pids.avail]=this->pid;
     _release_spinlock(&plock);
     sched(0,ZOMBIE);
     PANIC(); // prevent the warning of 'no_return function returns'
@@ -63,7 +64,7 @@ int wait(int* exitcode)
 {
     auto this = thisproc();
     bool all_zombie=false;
-    if (this->pid==2)
+    if (this->pid==1)
     {
         all_zombie=true;
         _acquire_spinlock(&plock);
@@ -110,11 +111,6 @@ int wait(int* exitcode)
 
 int start_proc(struct proc* p, void(*entry)(u64), u64 arg)
 {
-    // TODO
-    // 1. set the parent to root_proc if NULL
-    // 2. setup the kcontext to make the proc start with proc_entry(entry, arg)
-    // 3. activate the proc and return its pid
-    // NOTE: be careful of concurrency
     _acquire_spinlock(&plock);
     if (p->parent == NULL)
     {
@@ -132,12 +128,9 @@ int start_proc(struct proc* p, void(*entry)(u64), u64 arg)
 
 void init_proc(struct proc* p)
 {
-    // TODO
-    // setup the struct proc with kstack and pid allocated
-    // NOTE: be careful of concurrency
     _acquire_spinlock(&plock);
     memset(p,0,sizeof(*p));
-    p->pid=pids.freelist[++pids.avail];
+    p->pid=pids.freelist[pids.avail++];
     init_sem(&p->childexit,0);
     init_list_node(&p->children);
     init_list_node(&p->ptnode);
