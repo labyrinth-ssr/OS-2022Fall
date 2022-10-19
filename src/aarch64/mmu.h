@@ -36,10 +36,10 @@
 #define PTE_KERNEL_DEVICE (PTE_KERNEL | PTE_DEVICE | PTE_BLOCK)
 #define PTE_USER_DATA     (PTE_USER | PTE_NORMAL | PTE_PAGE)
 
-pt = kalloc_page();
-memset(pt, 0,PAGE_SIZE);
-va = 0x1111111111111111;
-pt[VA_PART0(va)];
+// pt = kalloc_page();
+// memset(pt, 0,PAGE_SIZE);
+// va = 0x1111111111111111;
+// pt[VA_PART0(va)];
 // va = 
 
 #define N_PTE_PER_TABLE 512

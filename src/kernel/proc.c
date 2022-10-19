@@ -52,6 +52,13 @@ NO_RETURN void exit(int code)
         _detach_from_list(&this->children);
         _merge_list(merged_list,&root_proc.children);
     }
+    _for_in_list(rcp,&root_proc.children){
+        auto rc=container_of(rcp,struct proc,ptnode);
+        if (is_zombie(rc))
+        {
+            wait(&rc->exitcode);
+        }
+    }
     post_sem(&this->parent->childexit);
     lock_for_sched(0);
     pids.freelist[--pids.avail]=this->pid;
@@ -63,25 +70,25 @@ NO_RETURN void exit(int code)
 int wait(int* exitcode)
 {
     auto this = thisproc();
-    bool all_zombie=false;
-    if (this->pid==1)
-    {
-        all_zombie=true;
-        _acquire_spinlock(&plock);
-        _for_in_list(c,&this->children){
-            if (c==&this->children)
-            {
-                continue;
-            }
-            auto child=container_of(c,struct proc,ptnode);
-            if (child->state!=ZOMBIE)
-            {
-                all_zombie=false;
-            }
-        }
-        _release_spinlock(&plock);
-    }
-    (void)all_zombie;
+    // bool all_zombie=false;
+    // if (this->pid==1)
+    // {
+    //     all_zombie=true;
+    //     _acquire_spinlock(&plock);
+    //     _for_in_list(c,&this->children){
+    //         if (c==&this->children)
+    //         {
+    //             continue;
+    //         }
+    //         auto child=container_of(c,struct proc,ptnode);
+    //         if (child->state!=ZOMBIE)
+    //         {
+    //             all_zombie=false;
+    //         }
+    //     }
+    //     _release_spinlock(&plock);
+    // }
+    // (void)all_zombie;
     _acquire_spinlock(&plock);
     if (_empty_list(&this->children))
     {
@@ -89,10 +96,10 @@ int wait(int* exitcode)
         return -1;
     }
     _release_spinlock(&plock);
-    if (!all_zombie)
-    {
-        wait_sem(&this->childexit);
-    }
+    // if (!all_zombie)
+    // {
+    wait_sem(&this->childexit);
+    // }
     _acquire_spinlock(&plock);
     _for_in_list(c,&this->children){
         auto child=container_of(c,struct proc,ptnode);
