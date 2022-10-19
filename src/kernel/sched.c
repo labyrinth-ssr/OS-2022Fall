@@ -14,6 +14,14 @@ extern void swtch(KernelContext* new_ctx, KernelContext** old_ctx);
 static SpinLock rqlock;
 static ListNode rq;
 extern bool panic_flag;
+static struct timer sched_timer;
+
+static void sched_timer_handler(struct timer* t)
+{
+    printk("CPU %d: clock\n");
+    // t->data++;
+    // set_cpu_timer(&hello_timer[cpuid()]);
+}
 
 define_early_init(rq){
     init_spinlock(&rqlock);
@@ -90,7 +98,7 @@ bool activate_proc(struct proc* p)
     }
     else
     {
-        PANIC();
+        return false;
     }
     _release_sched_lock();
     return true;
@@ -132,7 +140,10 @@ static struct proc* pick_next()
 static void update_this_proc(struct proc* p)
 {
     
-    reset_clock(1000);
+    // reset_clock(1000);
+    sched_timer.elapse = 1000;
+    sched_timer.handler = sched_timer_handler;
+    set_cpu_timer(&sched_timer);
     cpus[cpuid()].sched.thisproc = p;
 }
 
