@@ -60,6 +60,7 @@ NO_RETURN void exit(int code)
         _detach_from_list(&this->children);
         _merge_list(merged_list,&root_proc.children);
     }
+    free_pgdir(&this->pgdir);
     post_sem(&this->parent->childexit);
     lock_for_sched(0);
     pids.freelist[--pids.avail]=this->pid;
@@ -117,12 +118,44 @@ int wait(int* exitcode)
     PANIC();
 }
 
+struct proc* dfs (struct proc* proc,int pid){
+    if (proc->pid==pid && proc->state!=UNUSED)
+    {
+        return proc;
+    }
+
+    if (_empty_list(&proc->children))
+    {
+        return NULL;
+    }
+
+    _for_in_list(cp,&proc->children){
+        auto c_proc=container_of(cp,struct proc,ptnode);
+        auto child_res = dfs(c_proc,pid);
+        if (child_res!=NULL)
+        {
+        return child_res;
+        }
+    }
+    return NULL;
+}
+
 int kill(int pid)
 {
     // TODO
     // Set the killed flag of the proc to true and return 0.
     // Return -1 if the pid is invalid (proc not found).
-    
+    _acquire_spinlock(&plock);
+    auto kill_proc = dfs(&root_proc,pid);
+    if (kill_proc != NULL)
+    {
+        kill_proc->killed=true;
+        _release_spinlock(&plock);
+        activate_proc(kill_proc);
+        return 0;
+    }
+    _release_spinlock(&plock);
+    return -1;
 }
 
 int start_proc(struct proc* p, void(*entry)(u64), u64 arg)
@@ -150,6 +183,7 @@ void init_proc(struct proc* p)
     init_sem(&p->childexit,0);
     init_list_node(&p->children);
     init_list_node(&p->ptnode);
+    init_pgdir(&p->pgdir);
     p->kstack=kalloc_page();
     init_schinfo(&p->schinfo);
     p->kcontext=(KernelContext*)((u64)p->kstack + PAGE_SIZE - 16 - sizeof(KernelContext) - sizeof(UserContext));

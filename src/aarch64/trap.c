@@ -16,7 +16,6 @@ void trap_global_handler(UserContext* context)
     u64 ir = esr & ESR_IR_MASK;
     (void)iss;
     arch_reset_esr();
-
     switch (ec)
     {
         case ESR_EC_UNKNOWN:
@@ -31,6 +30,7 @@ void trap_global_handler(UserContext* context)
         } break;
         case ESR_EC_SVC64:
         {
+            // printk("syscall entry\n");
             syscall_entry(context);
         } break;
         case ESR_EC_IABORT_EL0:
@@ -49,6 +49,11 @@ void trap_global_handler(UserContext* context)
     }
 
     // TODO: stop killed process while returning to user space
+    if (thisproc()->killed)
+    {
+        exit (-1);
+    }
+    
 
 }
 

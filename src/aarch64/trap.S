@@ -15,10 +15,16 @@ pushp(x0,x1)
 mrs x0, spsr_el1
 mrs x1, elr_el1
 pushp(x0,x1)
+mrs x0, sp_el0
+pushp (lr,x0)
+
 mov x0, sp
 bl trap_global_handler
+
 .global trap_return
 trap_return:
+popp(lr,x0)
+msr sp_el0,x0
 popp(x0,x1)
 msr spsr_el1,x0
 msr elr_el1,x1
@@ -31,6 +37,7 @@ popp(x10,x11)
 popp(x12,x13)
 popp(x14,x15)
 popp(x16,x17)
+
 eret
 
 

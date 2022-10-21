@@ -10,15 +10,24 @@
 extern bool panic_flag;
 
 extern void swtch(KernelContext* new_ctx, KernelContext** old_ctx);
+extern struct proc root_proc;
 
 static SpinLock rqlock;
 static ListNode rq;
 extern bool panic_flag;
-static struct timer sched_timer;
+static struct timer sched_timer[4];
+static bool sched_timer_set[4];
 
 static void sched_timer_handler(struct timer* t)
 {
-    printk("CPU %d: clock\n");
+    // printk("CPU %d: clock\n",cpuid());
+    // set_cpu_timer(&sched_timer[cpuid()]);
+    (void)t;
+    if (t->triggered)
+    {
+        yield();
+        set_cpu_timer(t);
+    }
     // t->data++;
     // set_cpu_timer(&hello_timer[cpuid()]);
 }
@@ -71,11 +80,11 @@ bool is_zombie(struct proc* p)
     return r;
 }
 
-bool is_unused(struct proc* p)
+bool is_used(struct proc* p)
 {
     bool r;
     _acquire_sched_lock();
-    r = p->state == ZOMBIE;
+    r = p->state != UNUSED;
     _release_sched_lock();
     return r;
 }
@@ -141,9 +150,19 @@ static void update_this_proc(struct proc* p)
 {
     
     // reset_clock(1000);
-    sched_timer.elapse = 1000;
-    sched_timer.handler = sched_timer_handler;
-    set_cpu_timer(&sched_timer);
+    // (void)sched_timer;
+    // (void)sched_timer_handler;
+    // (void)sched_timer_set;
+
+    if (p->pid != 0 && p != &root_proc && !sched_timer_set[cpuid()])
+    {
+        sched_timer[cpuid()].elapse = 100;
+        sched_timer[cpuid()].handler = sched_timer_handler;
+        set_cpu_timer(&sched_timer[cpuid()]);
+        printk("cpu%d set sched_timer %d\n",cpuid(),p->pid);
+        sched_timer_set[cpuid()]=true;
+    }
+
     cpus[cpuid()].sched.thisproc = p;
 }
 
@@ -153,6 +172,10 @@ static void simple_sched(enum procstate new_state)
 {
     auto this = thisproc();
     ASSERT(this->state == RUNNING);
+    if (this->killed && new_state != ZOMBIE)
+    {
+        return;
+    }
     update_this_state(new_state);
     auto next = pick_next();
     update_this_proc(next);
@@ -160,7 +183,12 @@ static void simple_sched(enum procstate new_state)
     next->state = RUNNING;
     if (next != this)
     {
+        // printk("attach\n");
+        // printk("this proc%d,pt:%p",this->pid,this->pgdir.pt);
+        // printk("next proc%d,pt:%p",next->pid,next->pgdir.pt);
+        attach_pgdir (&next->pgdir);
         swtch(next->kcontext, &this->kcontext);
+        attach_pgdir(&this->pgdir);
     }
     _release_sched_lock();
 }
