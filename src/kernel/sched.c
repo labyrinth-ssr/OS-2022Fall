@@ -25,8 +25,12 @@ static void sched_timer_handler(struct timer* t)
     (void)t;
     if (t->triggered)
     {
+        // printk("yield\n");
         yield();
         set_cpu_timer(t);
+    }
+    else {
+        printk("trigger not by clock\n");
     }
     // t->data++;
     // set_cpu_timer(&hello_timer[cpuid()]);
@@ -56,7 +60,7 @@ struct proc* thisproc()
 void init_schinfo(struct schinfo* p)
 {
     init_list_node(&p->rq);
-    p->prio=0;
+    p->prio=5;
 
 }
 
@@ -103,6 +107,7 @@ bool activate_proc(struct proc* p)
     if (p->state == SLEEPING || p->state == UNUSED)
     {
         p->state = RUNNABLE;
+        p->schinfo.prio=10;
         _insert_into_list(&rq, &p->schinfo.rq);
     }
     else
@@ -122,15 +127,23 @@ static void update_this_state(enum procstate new_state)
     {
         _detach_from_list(&this->schinfo.rq);
     }
+    else if (new_state==RUNNABLE)
+    {
+        this->schinfo.prio=0;
+    }
 }
 
 static struct proc* pick_next()
 {
     if (panic_flag)
     {
+        printk("panic\n");
         return cpus[cpuid()].sched.idle;
     }
     int cnt = 0;
+    struct proc* res_proc=NULL;
+    int max_prior = 0;
+    (void)max_prior;
     _for_in_list(p, &rq){
         if (p == &rq)
         {
@@ -138,25 +151,44 @@ static struct proc* pick_next()
         }
         auto proc = container_of(p, struct proc, schinfo.rq);
         cnt++;
-        if (proc->state == RUNNABLE && (thisproc()->idle || cnt!=1))
+        // printk("%d be sched, try pick %d, prio %d\n",thisproc()->pid,proc->pid,proc->schinfo.prio);
+        if (proc->state == RUNNABLE /*&& (thisproc()->idle || cnt!=1)*/ /*&& proc->schinfo.prio >= max_prior*/)
         {
-            return proc;
-        } 
+            // printk("max temp %d\n",proc->pid);
+            max_prior = proc->schinfo.prio;
+            res_proc=proc;
+        }
     }
+    if (res_proc!=NULL)
+    {
+        _for_in_list(p, &rq){
+        if (p == &rq)
+        {
+            continue;
+        }
+        auto proc = container_of(p, struct proc, schinfo.rq);
+        if (proc->state == RUNNABLE && proc != res_proc)
+        {
+            proc->schinfo.prio ++;
+        }
+    }
+        // printk("cpu %d pick %d\n",cpuid(),res_proc->pid);
+        if (res_proc->pid==9)
+        {
+            printk("break\n");
+        }
+        return res_proc;
+    }
+    printk("no process\n");
     return cpus[cpuid()].sched.idle;
 }
 
 static void update_this_proc(struct proc* p)
 {
     
-    // reset_clock(1000);
-    // (void)sched_timer;
-    // (void)sched_timer_handler;
-    // (void)sched_timer_set;
-
     if (p->pid != 0 && p != &root_proc && !sched_timer_set[cpuid()])
     {
-        sched_timer[cpuid()].elapse = 100;
+        sched_timer[cpuid()].elapse = 1;
         sched_timer[cpuid()].handler = sched_timer_handler;
         set_cpu_timer(&sched_timer[cpuid()]);
         printk("cpu%d set sched_timer %d\n",cpuid(),p->pid);
@@ -171,6 +203,12 @@ static void update_this_proc(struct proc* p)
 static void simple_sched(enum procstate new_state)
 {
     auto this = thisproc();
+    // printk("%d sched\n",this->pid);
+    // if (this->pid==22)
+    // {
+    //     printk("break\n");
+    // }
+    
     ASSERT(this->state == RUNNING);
     if (this->killed && new_state != ZOMBIE)
     {
@@ -183,9 +221,6 @@ static void simple_sched(enum procstate new_state)
     next->state = RUNNING;
     if (next != this)
     {
-        // printk("attach\n");
-        // printk("this proc%d,pt:%p",this->pid,this->pgdir.pt);
-        // printk("next proc%d,pt:%p",next->pid,next->pgdir.pt);
         attach_pgdir (&next->pgdir);
         swtch(next->kcontext, &this->kcontext);
         attach_pgdir(&this->pgdir);

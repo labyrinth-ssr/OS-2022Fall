@@ -44,6 +44,7 @@ static Semaphore myrepot_done;
 define_syscall(myreport, u64 id)
 {
     static bool stop;
+    // printk("proc_cnt[%lld]:%lld\n",id,proc_cnt[id]);
     ASSERT(id < 22);
     if (stop)
         return 0;
@@ -51,6 +52,7 @@ define_syscall(myreport, u64 id)
     cpu_cnt[cpuid()]++;
     if (proc_cnt[id] > 12345)
     {
+        // printk("proc %lld reach \n",id);
         stop = true;
         post_sem(&myrepot_done);
     }
@@ -73,7 +75,7 @@ void user_proc_test()
         ASSERT(p->pgdir.pt);
         p->ucontext->x[0] = i;
         p->ucontext->elr = 0x400000;
-        // p->ucontext->ttbr0 = K2P(p->pgdir.pt);
+        // p->ucontext->ttbr0 = K2P(p->pgdir.pt);    
         p->ucontext->spsr = 0;
         pids[i] = start_proc(p, trap_return, 0);
         printk("pid[%d] = %d\n", i, pids[i]);

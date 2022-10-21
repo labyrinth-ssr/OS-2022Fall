@@ -32,6 +32,7 @@ void trap_global_handler(UserContext* context)
         {
             // printk("syscall entry\n");
             syscall_entry(context);
+            // printk("syscall finish\n");
         } break;
         case ESR_EC_IABORT_EL0:
         case ESR_EC_IABORT_EL1:
