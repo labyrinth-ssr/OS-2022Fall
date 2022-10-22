@@ -23,7 +23,6 @@ typedef struct KernelContext
 
 } KernelContext;
 
-//root has child zombie info?
 struct proc
 {
     bool killed;
