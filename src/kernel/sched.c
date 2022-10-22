@@ -20,8 +20,10 @@ static bool sched_timer_set[4];
 
 static void sched_timer_handler(struct timer *t) {
   (void)t;
-  set_cpu_timer(&sched_timer[cpuid()]);
-  yield();
+  if (t->triggered) {
+    set_cpu_timer(&sched_timer[cpuid()]);
+    yield();
+  }
 }
 
 define_early_init(rq) {
@@ -81,7 +83,7 @@ bool activate_proc(struct proc *p) {
     p->state = RUNNABLE;
     p->schinfo.prio = 100;
     _insert_into_list(&rq, &p->schinfo.rq);
-  } else {
+  } else if (p->state==ZOMBIE) {
     return false;
   }
   _release_sched_lock();

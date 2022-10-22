@@ -89,7 +89,11 @@ int wait(int *exitcode) {
     return -1;
   }
   _release_spinlock(&plock);
-  wait_sem(&this->childexit);
+  auto wait_sem_ret = wait_sem(&this->childexit);
+  if (!wait_sem_ret)
+  {
+    return -1;
+  }
   _acquire_spinlock(&plock);
   _for_in_list(c, &this->children) {
     auto child = container_of(c, struct proc, ptnode);
@@ -133,8 +137,7 @@ int kill(int pid) {
   if (kill_proc != NULL) {
     kill_proc->killed = true;
     _release_spinlock(&plock);
-    activate_proc(kill_proc);
-    return 0;
+      return 0;
   }
   _release_spinlock(&plock);
   return -1;
