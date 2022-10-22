@@ -44,10 +44,12 @@ static Semaphore myrepot_done;
 define_syscall(myreport, u64 id)
 {
     static bool stop;
-    // printk("proc_cnt[%lld]:%lld\n",id,proc_cnt[id]);
+    // printk("cpu %d proc_cnt[%lld]:%lld\n",cpuid(),id,proc_cnt[id]);
     ASSERT(id < 22);
-    if (stop)
+    if (stop){
+        // printk("stop\n");
         return 0;
+    }
     proc_cnt[id]++;
     cpu_cnt[cpuid()]++;
     if (proc_cnt[id] > 12345)

@@ -75,6 +75,7 @@ static void hello(struct timer* t)
 {
     printk("CPU %d: living\n", cpuid());
     t->data++;
+    // yield();
     set_cpu_timer(&hello_timer[cpuid()]);
 }
 

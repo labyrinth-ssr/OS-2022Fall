@@ -155,6 +155,13 @@ int kill(int pid)
     return -1;
 }
 
+bool is_killed(struct proc* proc){
+    _acquire_spinlock(&plock);
+    auto ret= proc->killed;
+    _release_spinlock(&plock);
+    return ret;
+}
+
 int start_proc(struct proc* p, void(*entry)(u64), u64 arg)
 {
     _acquire_spinlock(&plock);

@@ -49,3 +49,4 @@ int start_proc(struct proc*, void(*entry)(u64), u64 arg);
 NO_RETURN void exit(int code);
 int wait(int* exitcode);
 int kill(int pid);
+bool is_killed(struct proc* proc);
