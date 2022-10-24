@@ -11,12 +11,15 @@ enum procstate { UNUSED, RUNNABLE, RUNNING, SLEEPING, ZOMBIE };
 typedef struct UserContext
 {
     // TODO: customize your trap frame
-
+    u64 lr,sp,spsr,elr;
+    u64 x[18];
 } UserContext;
 
 typedef struct KernelContext
 {
     // TODO: customize your context
+    u64 lr,x0,x1;
+    u64 x[11];
 
 } KernelContext;
 
@@ -36,6 +39,7 @@ struct proc
     void* kstack;
     UserContext* ucontext;
     KernelContext* kcontext;
+    bool children_zombie;
 };
 
 // void init_proc(struct proc*);
@@ -44,3 +48,4 @@ int start_proc(struct proc*, void(*entry)(u64), u64 arg);
 NO_RETURN void exit(int code);
 int wait(int* exitcode);
 int kill(int pid);
+bool is_killed(struct proc* proc);

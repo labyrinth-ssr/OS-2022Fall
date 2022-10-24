@@ -14,7 +14,7 @@ NO_RETURN void idle_entry() {
         if (panic_flag)
             break;
         arch_with_trap {
-            arch_wfi();
+            // arch_wfi();
         }
     }
     set_cpu_off();
@@ -23,8 +23,6 @@ NO_RETURN void idle_entry() {
 
 NO_RETURN void kernel_entry() {
     printk("hello world %d\n", (int)sizeof(struct proc));
-
-    // proc_test();
     vm_test();
     user_proc_test();
     
