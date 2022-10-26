@@ -102,24 +102,26 @@ void sd_init() {
   sdInit();
   init_spinlock(&sdlock);
   bufqueue_init(&bqueue);
-  _release_spinlock(&sdlock);
   set_interrupt_handler(IRQ_ARASANSDIO, sd_intr);
   set_interrupt_handler(IRQ_SDIO, sd_intr);
-  // auto get_MBR = (buf*) kalloc(sizeof(buf));
-  // memset(get_MBR, 0, sizeof(*get_MBR));
-  // _acquire_spinlock(&sdlock);
-  // bufqueue_push(&bqueue ,get_MBR);
-  // sd_start(get_MBR);
-  // sdWaitForInterrupt(INT_DATA_DONE);
-  // printk("mbr data:\n");
-  // for (int i = 0; i < BSIZE; i++)
-  // {
-  //     if (i>445&&i<462)
-  //     {
-  //         printk("%d ",(int)get_MBR->data[i]);
-  //     }
-  // }
-  // _release_spinlock(&sdlock);
+  auto get_MBR = (buf *)kalloc(sizeof(buf));
+  memset(get_MBR, 0, sizeof(*get_MBR));
+  bufqueue_lock(&bqueue);
+  bufqueue_push(&bqueue, get_MBR);
+  bufqueue_unlock(&bqueue);
+  auto save_flag = get_MBR->flags;
+  get_and_clear_EMMC_INTERRUPT();
+  _acquire_spinlock(&sdlock);
+  sd_start(get_MBR);
+  _release_spinlock(&sdlock);
+  init_sem(&rw_done, 0);
+  while (save_flag == get_MBR->flags) {
+    wait_sem(&rw_done);
+  }
+  
+  auto LBA = *(u32*)((u64)get_MBR->data + 0x1CE + 0x8);
+  auto sec_num = *(u32*)((u64)get_MBR->data + 0x1CE + 0xC);
+  printk("mbr data: LBA:%d, sec_num:%d\n", LBA, sec_num);
   // printk(""get_MBR->data[]);
 }
 
@@ -165,7 +167,6 @@ static void sd_start(struct buf *b) {
     if ((resp = sdWaitForInterrupt(INT_WRITE_RDY))) {
       printk("* EMMC ERROR: Timeout waiting for ready to write\n");
       PANIC();
-      // return sdDebugResponse(resp);
     }
     if (*EMMC_INTERRUPT) {
       printk("%d\n", *EMMC_INTERRUPT);
@@ -173,7 +174,6 @@ static void sd_start(struct buf *b) {
     }
     while (done < 128)
       *EMMC_DATA = intbuf[done++];
-    // printk("written\n");
   }
 }
 
@@ -200,51 +200,47 @@ void sd_intr() {
    *
    * TODO: Lab5 driver.
    */
-  // arch_dsb_sy();
-  // sd_start();
-  // sdWaitForInterrupt(INT_READ_RDY);
-  // auto resp =
-  //
-  // printk("get into interrupt\n");
   bufqueue_lock(&bqueue);
   auto b = bufqueue_front(&bqueue);
   // write
-  while (!bufqueue_empty(&bqueue)) {
-    if (b->flags & B_DIRTY) {
-      b->flags = B_VALID;
-      bufqueue_pop(&bqueue);
-      post_sem(&rw_done);
-        _acquire_spinlock(&sdlock);
-      sdWaitForInterrupt(INT_DATA_DONE);
-      _release_spinlock(&sdlock);
+  // while (!bufqueue_empty(&bqueue)) {
+  if (b->flags & B_DIRTY) {
+    b->flags = B_VALID;
+    bufqueue_pop(&bqueue);
+    post_sem(&rw_done);
+    _acquire_spinlock(&sdlock);
+    sdWaitForInterrupt(INT_DATA_DONE);
+    _release_spinlock(&sdlock);
+  } else if (!(b->flags & B_VALID)) {
+    _acquire_spinlock(&sdlock);
+    u32 *intbuf = (u32 *)b->data;
+    (void)intbuf;
+    int done = 0;
+    if (sdWaitForInterrupt(INT_READ_RDY)) {
+      printk("* EMMC ERROR: Timeout waiting for ready to read\n");
+      PANIC();
     }
-    else if (!(b->flags & B_VALID)) {
-        _acquire_spinlock(&sdlock);
-      u32 *intbuf = (u32 *)b->data;
-      (void)intbuf;
-      int done = 0;
-      if (sdWaitForInterrupt(INT_READ_RDY)) {
-        printk("* EMMC ERROR: Timeout waiting for ready to read\n");
-        PANIC();
-      }
-      if (*EMMC_INTERRUPT) {
-        printk("%d\n", *EMMC_INTERRUPT);
-        PANIC();
-      }
-      while (done < 128)
-        intbuf[done++] = *EMMC_DATA;
-      b->flags = B_VALID;
-      post_sem(&rw_done);
-      sdWaitForInterrupt(INT_DATA_DONE);
-      _release_spinlock(&sdlock);
-      bufqueue_pop(&bqueue);
-    //   return;
+    if (*EMMC_INTERRUPT) {
+      printk("%d\n", *EMMC_INTERRUPT);
+      PANIC();
     }
-    // bufqueue_lock(&bqueue);
+    while (done < 128)
+      intbuf[done++] = *EMMC_DATA;
+    b->flags = B_VALID;
+    post_sem(&rw_done);
+    sdWaitForInterrupt(INT_DATA_DONE);
+    _release_spinlock(&sdlock);
+    bufqueue_pop(&bqueue);
   }
+  // }
+  if (!bufqueue_empty(&bqueue)) {
+    printk("que not empty\n");
     bufqueue_unlock(&bqueue);
+    get_and_clear_EMMC_INTERRUPT();
+    sd_start(bufqueue_front(&bqueue));
+  }
 
-  return;
+  bufqueue_unlock(&bqueue);
 }
 
 void sdrw(buf *b) {
@@ -262,18 +258,14 @@ void sdrw(buf *b) {
   bufqueue_push(&bqueue, b);
   auto b_first = bufqueue_front(&bqueue);
   bufqueue_unlock(&bqueue);
-
   auto flag_save = b_first->flags;
   _acquire_spinlock(&sdlock);
+  get_and_clear_EMMC_INTERRUPT();
   sd_start(b_first);
   _release_spinlock(&sdlock);
   while (flag_save == b_first->flags) {
     wait_sem(&rw_done);
-    // sd_start(b_first);
-    // sched(0,SLEEPING);
   }
-  // sdWaitForInterrupt(INT_DATA_DONE);
-  // printk("finish r w");
 }
 
 /* SD card test and benchmark. */
@@ -296,14 +288,12 @@ void sd_test() {
     b[0].flags = 0;
     b[0].blockno = (u32)i;
     sdrw(&b[0]);
-    // printk("1");
     // Write some value.
     b[i].flags = B_DIRTY;
     b[i].blockno = (u32)i;
     for (int j = 0; j < BSIZE; j++)
       b[i].data[j] = (u8)((i * j) & 0xFF);
     sdrw(&b[i]);
-    // printk("2");
 
     memset(b[i].data, 0, sizeof(b[i].data));
     // Read back and check
@@ -318,7 +308,6 @@ void sd_test() {
     // Restore previous value.
     b[0].flags = B_DIRTY;
     sdrw(&b[0]);
-    // printk("%d ",i);
   }
 
   // Read benchmark
