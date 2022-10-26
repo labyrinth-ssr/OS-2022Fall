@@ -138,7 +138,7 @@ static struct proc *pick_next() {
 static void update_this_proc(struct proc *p) {
 
   if (p->pid != 0 && p != &root_proc && !sched_timer_set[cpuid()]) {
-    sched_timer[cpuid()].elapse = 10;
+    sched_timer[cpuid()].elapse = 1;
     sched_timer[cpuid()].handler = sched_timer_handler;
     set_cpu_timer(&sched_timer[cpuid()]);
     sched_timer_set[cpuid()] = true;
