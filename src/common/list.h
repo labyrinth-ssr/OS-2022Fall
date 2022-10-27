@@ -69,6 +69,7 @@ typedef struct Queue {
     int sz;
     SpinLock lk;
 } Queue;
+
 void queue_init(Queue* x);
 void queue_lock(Queue* x);
 void queue_unlock(Queue* x);

@@ -16,7 +16,6 @@ void trap_global_handler(UserContext* context)
     u64 ir = esr & ESR_IR_MASK;
     (void)iss;
     arch_reset_esr();
-
     switch (ec)
     {
         case ESR_EC_UNKNOWN:
@@ -49,6 +48,12 @@ void trap_global_handler(UserContext* context)
     }
 
     // TODO: stop killed process while returning to user space
+    // extern char loop_start[], loop_end[];
+
+    if (thisproc()->killed && (KSPACE_MASK & context->elr)==0)
+    {
+        exit (-1);
+    }
 
 }
 

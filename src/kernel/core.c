@@ -3,9 +3,12 @@
 #include <kernel/init.h>
 #include <kernel/sched.h>
 #include <test/test.h>
+#include <driver/sd.h>
 // #include <driver/sd.h>
 
 bool panic_flag;
+extern void sd_init();
+extern void sd_test();
 
 NO_RETURN void idle_entry() {
     set_cpu_on();
@@ -13,9 +16,16 @@ NO_RETURN void idle_entry() {
         yield();
         if (panic_flag)
             break;
-        arch_with_trap {
-            arch_wfi();
-        }
+        // if (cpuid()==0)
+        // {
+            arch_with_trap {
+                // arch_wfi();
+            }
+        // }
+        // else
+        // {
+        //     arch_stop_cpu();
+        // }
     }
     set_cpu_off();
     arch_stop_cpu();
@@ -24,11 +34,13 @@ NO_RETURN void idle_entry() {
 NO_RETURN void kernel_entry() {
     printk("hello world %d\n", (int)sizeof(struct proc));
 
-    // proc_test();
-    vm_test();
-    user_proc_test();
+    sd_init();
+    sd_test();
     
-    do_rest_init();
+    // vm_test();
+    // user_proc_test();
+    
+    // do_rest_init();
 
     while (1)
         yield();
