@@ -19,7 +19,7 @@ PTEntriesPtr get_pte(struct pgdir *pgdir, u64 va, bool alloc) {
     memset(pt0, 0, PAGE_SIZE);
   }
   PTEntriesPtr pt1=NULL;
-  if (pt0[VA_PART0(va)] == NULL) {
+  if (pt0[VA_PART0(va)] == NULL || !( pt0[VA_PART0(va)] & PTE_VALID)) {
     if (!alloc)
       return NULL;
     pt1 =(PTEntriesPtr) kalloc_page();
@@ -30,7 +30,7 @@ PTEntriesPtr get_pte(struct pgdir *pgdir, u64 va, bool alloc) {
     pt1 = (PTEntriesPtr)P2K(PTE_ADDRESS(pt0[VA_PART0(va)]));
   }
   PTEntriesPtr pt2=NULL;
-  if (pt1[VA_PART1(va)] == NULL) {
+  if (pt1[VA_PART1(va)] == NULL || !(pt1[VA_PART1(va)] & PTE_VALID) ) {
     if (!alloc)
       return NULL;
     pt2 =(PTEntriesPtr) kalloc_page();
@@ -42,7 +42,7 @@ PTEntriesPtr get_pte(struct pgdir *pgdir, u64 va, bool alloc) {
     pt2 = (PTEntriesPtr)P2K(PTE_ADDRESS(pt1[VA_PART1(va)]));
   }
   PTEntriesPtr pt3=NULL;
-  if (pt2[VA_PART2(va)] == NULL) {
+  if (pt2[VA_PART2(va)] == NULL || !(pt2[VA_PART2(va)] & PTE_VALID)) {
     if (!alloc)
       return NULL;
     pt3 =(PTEntriesPtr) kalloc_page();

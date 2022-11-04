@@ -118,11 +118,9 @@ void sd_init() {
   while (save_flag == get_MBR->flags) {
     wait_sem(&rw_done);
   }
-  
-  auto LBA = *(u32*)((u64)get_MBR->data + 0x1CE + 0x8);
-  auto sec_num = *(u32*)((u64)get_MBR->data + 0x1CE + 0xC);
+  auto LBA = *(u32 *)((u64)get_MBR->data + 0x1CE + 0x8);
+  auto sec_num = *(u32 *)((u64)get_MBR->data + 0x1CE + 0xC);
   printk("mbr data: LBA:%d, sec_num:%d\n", LBA, sec_num);
-  // printk(""get_MBR->data[]);
 }
 
 /* Start the request for b. Caller must hold sdlock. */
@@ -202,20 +200,15 @@ void sd_intr() {
    */
   bufqueue_lock(&bqueue);
   auto b = bufqueue_front(&bqueue);
-  // write
-  // while (!bufqueue_empty(&bqueue)) {
   if (b->flags & B_DIRTY) {
     b->flags = B_VALID;
     bufqueue_pop(&bqueue);
-    post_sem(&rw_done);
     _acquire_spinlock(&sdlock);
     sdWaitForInterrupt(INT_DATA_DONE);
     _release_spinlock(&sdlock);
+    post_sem(&rw_done);
   } else if (!(b->flags & B_VALID)) {
     _acquire_spinlock(&sdlock);
-    u32 *intbuf = (u32 *)b->data;
-    (void)intbuf;
-    int done = 0;
     if (sdWaitForInterrupt(INT_READ_RDY)) {
       printk("* EMMC ERROR: Timeout waiting for ready to read\n");
       PANIC();
@@ -224,19 +217,20 @@ void sd_intr() {
       printk("%d\n", *EMMC_INTERRUPT);
       PANIC();
     }
+    u32 *intbuf = (u32 *)b->data;
+    (void)intbuf;
+    int done = 0;
     while (done < 128)
       intbuf[done++] = *EMMC_DATA;
-    b->flags = B_VALID;
-    post_sem(&rw_done);
     sdWaitForInterrupt(INT_DATA_DONE);
     _release_spinlock(&sdlock);
+    b->flags = B_VALID;
     bufqueue_pop(&bqueue);
+    post_sem(&rw_done);
   }
-  // }
   if (!bufqueue_empty(&bqueue)) {
     printk("que not empty\n");
     bufqueue_unlock(&bqueue);
-    get_and_clear_EMMC_INTERRUPT();
     sd_start(bufqueue_front(&bqueue));
   }
 
@@ -256,15 +250,22 @@ void sdrw(buf *b) {
   init_sem(&rw_done, 0);
   bufqueue_lock(&bqueue);
   bufqueue_push(&bqueue, b);
-  auto b_first = bufqueue_front(&bqueue);
-  bufqueue_unlock(&bqueue);
-  auto flag_save = b_first->flags;
   _acquire_spinlock(&sdlock);
-  get_and_clear_EMMC_INTERRUPT();
-  sd_start(b_first);
+  sd_start(b);
   _release_spinlock(&sdlock);
-  while (flag_save == b_first->flags) {
-    wait_sem(&rw_done);
+  if (bufqueue_empty(&bqueue)) {
+    bufqueue_unlock(&bqueue);
+    auto flag_save = b->flags;
+    while (flag_save == b->flags) {
+      wait_sem(&rw_done);
+    }
+  } else {
+    auto b_first = bufqueue_front(&bqueue);
+    bufqueue_unlock(&bqueue);
+    auto flag_save = b_first->flags;
+    while (flag_save == b_first->flags) {
+      wait_sem(&rw_done);
+    }
   }
 }
 

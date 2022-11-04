@@ -96,6 +96,10 @@ int wait(int *exitcode) {
   }
   _acquire_spinlock(&plock);
   _for_in_list(c, &this->children) {
+    if (c == &this->children)
+    {
+      continue;
+    }
     auto child = container_of(c, struct proc, ptnode);
     if (is_zombie(child)) {
       auto pid = child->pid;
@@ -119,6 +123,10 @@ struct proc *dfs(struct proc *proc, int pid) {
   }
 
   _for_in_list(cp, &proc->children) {
+    if (cp == &proc->children)
+    {
+      continue;
+    }
     auto c_proc = container_of(cp, struct proc, ptnode);
     auto child_res = dfs(c_proc, pid);
     if (child_res != NULL) {
