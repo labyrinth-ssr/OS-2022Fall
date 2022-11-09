@@ -83,7 +83,7 @@ bool activate_proc(struct proc *p) {
     p->state = RUNNABLE;
     p->schinfo.prio = 100;
     _insert_into_list(&rq, &p->schinfo.rq);
-  } else if (p->state==ZOMBIE) {
+  } else if (p->state == ZOMBIE) {
     return false;
   }
   _release_sched_lock();
