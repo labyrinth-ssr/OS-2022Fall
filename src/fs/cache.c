@@ -123,10 +123,11 @@ static Block *cache_acquire(usize block_no) {
   new_block->block_no = block_no;
   _insert_into_list(&head, &new_block->node);
   new_block->acquired = true;
+  new_block->valid = true;
+
   _release_spinlock(&lock);
   wait_sem(&new_block->lock);
   device_read(new_block);
-  new_block->valid = true;
   return new_block;
 }
 
@@ -312,6 +313,7 @@ void bzero(OpContext *ctx, u32 block_no) {
   cache_sync(ctx, bp);
   cache_release(bp);
 }
+
 static usize cache_alloc(OpContext *ctx) {
   // TODO
   u32 b, bi, m;
