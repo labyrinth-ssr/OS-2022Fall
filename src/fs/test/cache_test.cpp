@@ -1,3 +1,4 @@
+#include "kernel/printk.h"
 extern "C" {
 #include <fs/cache.h>
 }
@@ -147,9 +148,11 @@ void test_lru() {
 // targets: `begin_op`, `end_op`, `sync`.
 
 void test_atomic_op() {
+
   initialize(32, 64);
 
   OpContext ctx;
+
   bcache.begin_op(&ctx);
   bcache.end_op(&ctx);
 
@@ -310,11 +313,13 @@ void test_global_absorption() {
     bcache.sync(&out, b);
     bcache.release(b);
   }
+  //   PAUSE
 
   std::vector<OpContext> ctx;
   std::vector<std::thread> workers;
   ctx.resize(num_workers);
   workers.reserve(num_workers);
+  //   PAUSE
 
   for (usize i = 0; i < num_workers; i++) {
     bcache.begin_op(&ctx[i]);

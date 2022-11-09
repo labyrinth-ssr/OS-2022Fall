@@ -249,8 +249,8 @@ void sdrw(buf *b) {
    */
   init_sem(&rw_done, 0);
   bufqueue_lock(&bqueue);
-  bufqueue_push(&bqueue, b);
   _acquire_spinlock(&sdlock);
+  bufqueue_push(&bqueue, b);
   sd_start(b);
   _release_spinlock(&sdlock);
   if (bufqueue_empty(&bqueue)) {
@@ -279,7 +279,7 @@ void sd_test() {
   if (!mb)
     PANIC();
   i64 f, t;
-  asm volatile("mrs %[freq], cntfrq_el0" : [freq] "=r"(f));
+  asm volatile("mrs %[freq], cntfrq_el0" : [ freq ] "=r"(f));
   printk("- sd test: begin nblocks %d\n", n);
 
   printk("- sd check rw...\n");
