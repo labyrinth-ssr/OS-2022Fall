@@ -82,7 +82,7 @@ static Block *cache_acquire(usize block_no) {
       continue;
     }
     auto bp = container_of(p, Block, node);
-    if (bp->valid && bp->block_no == block_no) {
+    if (bp->block_no == block_no) {
       bp->acquired = true;
       _release_spinlock(&lock);
       unalertable_wait_sem(&bp->lock);
