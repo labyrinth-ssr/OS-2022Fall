@@ -45,8 +45,9 @@ define_syscall(myreport, u64 id)
 {
     static bool stop;
     ASSERT(id < 22);
-    if (stop)
+    if (stop){
         return 0;
+    }
     proc_cnt[id]++;
     cpu_cnt[cpuid()]++;
     if (proc_cnt[id] > 12345)
@@ -71,9 +72,9 @@ void user_proc_test()
             *get_pte(&p->pgdir, 0x400000 + q - (u64)loop_start, true) = K2P(q) | PTE_USER_DATA;
         }
         ASSERT(p->pgdir.pt);
-        p->ucontext->x0 = i;
+        p->ucontext->x[0] = i;
         p->ucontext->elr = 0x400000;
-        p->ucontext->ttbr0 = K2P(p->pgdir.pt);
+        // p->ucontext->ttbr0 = K2P(p->pgdir.pt);    
         p->ucontext->spsr = 0;
         pids[i] = start_proc(p, trap_return, 0);
         printk("pid[%d] = %d\n", i, pids[i]);
@@ -95,4 +96,3 @@ void user_proc_test()
     for (int i = 0; i < 22; i++)
         printk("Proc %d: %llu\n", i, proc_cnt[i]);
 }
-
