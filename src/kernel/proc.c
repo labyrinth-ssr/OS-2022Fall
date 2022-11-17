@@ -1,3 +1,4 @@
+#include "common/sem.h"
 #include <common/list.h>
 #include <common/string.h>
 #include <kernel/init.h>
@@ -90,14 +91,12 @@ int wait(int *exitcode) {
   }
   _release_spinlock(&plock);
   auto wait_sem_ret = wait_sem(&this->childexit);
-  if (!wait_sem_ret)
-  {
+  if (!wait_sem_ret) {
     return -1;
   }
   _acquire_spinlock(&plock);
   _for_in_list(c, &this->children) {
-    if (c == &this->children)
-    {
+    if (c == &this->children) {
       continue;
     }
     auto child = container_of(c, struct proc, ptnode);
@@ -123,8 +122,7 @@ struct proc *dfs(struct proc *proc, int pid) {
   }
 
   _for_in_list(cp, &proc->children) {
-    if (cp == &proc->children)
-    {
+    if (cp == &proc->children) {
       continue;
     }
     auto c_proc = container_of(cp, struct proc, ptnode);
@@ -145,7 +143,7 @@ int kill(int pid) {
   if (kill_proc != NULL) {
     kill_proc->killed = true;
     _release_spinlock(&plock);
-      return 0;
+    return 0;
   }
   _release_spinlock(&plock);
   return -1;
@@ -202,22 +200,21 @@ define_init(root_proc) {
   start_proc(&root_proc, kernel_entry, 123456);
 }
 
+// void yield() {
+//     // TODO: lab7 container
+//     // Give up cpu resources and switch to the scheduler
+//     // 1. get sched lock
+//     // 2. set process state and call scheduler
+//     // 3. don't forget to release your lock
 
-void yield() {
-    // TODO: lab7 container
-    // Give up cpu resources and switch to the scheduler
-    // 1. get sched lock
-    // 2. set process state and call scheduler
-    // 3. don't forget to release your lock
+// }
 
+void sleep(void *chan, SpinLock *lock) {
+  // TODO: lab7 container
+  // release lock and sleep on channel, reacquire lock when awakened
 }
 
-void sleep(void* chan, SpinLock* lock) {
-    // TODO: lab7 container
-    // release lock and sleep on channel, reacquire lock when awakened
-}
-
-void wakeup(void* chan) {
-    // TODO lab7 container
-    // wake up all sleeping processses on channel
+void wakeup(void *chan) {
+  // TODO lab7 container
+  // wake up all sleeping processses on channel
 }
