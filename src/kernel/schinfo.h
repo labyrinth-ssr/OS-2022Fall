@@ -20,3 +20,10 @@ struct schinfo
     // int time_counter;
     //nice value?
 };
+
+// embedded data for containers
+struct schqueue
+{
+    // TODO: customize your sched queue
+    
+};

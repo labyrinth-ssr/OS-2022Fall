@@ -4,7 +4,6 @@
 #include <kernel/printk.h>
 #include <kernel/sched.h>
 #include <test/test.h>
-// #include <driver/sd.h>
 
 bool panic_flag;
 extern void sd_init();
@@ -38,7 +37,12 @@ NO_RETURN void kernel_entry() {
   // vm_test();
   // user_proc_test();
 
-  // do_rest_init();
+  proc_test();
+  user_proc_test();
+  container_test();
+  // sd_test();
+
+  do_rest_init();
 
   while (1)
     yield();

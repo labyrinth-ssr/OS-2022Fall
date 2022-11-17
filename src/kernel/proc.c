@@ -82,7 +82,13 @@ NO_RETURN void exit(int code) {
   PANIC(); // prevent the warning of 'no_return function returns'
 }
 
-int wait(int *exitcode) {
+int wait(int *exitcode, int *pid) {
+
+  // TODO
+  // 1. return -1 if no children
+  // 2. wait for childexit
+  // 3. if any child exits, clean it up and return its local pid and exitcode
+  // NOTE: be careful of concurrency
   _acquire_spinlock(&plock);
   auto this = thisproc();
   if (_empty_list(&this->children)) {
@@ -157,6 +163,11 @@ bool is_killed(struct proc *proc) {
 }
 
 int start_proc(struct proc *p, void (*entry)(u64), u64 arg) {
+  // TODO
+  // 1. set the parent to root_proc if NULL
+  // 2. setup the kcontext to make the proc start with proc_entry(entry, arg)
+  // 3. activate the proc and return its local pid
+  // NOTE: be careful of concurrency
   _acquire_spinlock(&plock);
   if (p->parent == NULL) {
     p->parent = &root_proc;

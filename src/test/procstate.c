@@ -58,13 +58,13 @@ static void proc_test_1a(u64 a) {
   }
   switch (a) {
   case 0: {
-    int t = 0, x;
+    int t = 0, x, y;
     for (int i = 0; i < 10; i++) {
-      ASSERT(wait(&x) != -1);
+      ASSERT(wait(&x, &y) != -1);
       t |= 1 << (x - 10);
     }
     ASSERT(t == 1023);
-    ASSERT(wait(&x) == -1);
+    ASSERT(wait(&x, &y) == -1);
   } break;
   case 1:
     break;
@@ -78,30 +78,30 @@ static void proc_test_1a(u64 a) {
   case 5:
   case 6:
   case 7: {
-    int x;
+    int x, y;
     for (int i = 0; i < 10; i++)
-      ASSERT(wait(&x) != -1);
-    ASSERT(wait(&x) == -1);
+      ASSERT(wait(&x, &y) != -1);
+    ASSERT(wait(&x, &y) == -1);
   } break;
   case 8: {
-    int x;
+    int x, y;
     for (int i = 0; i < 10; i++)
       post_sem(&s3);
     for (int i = 0; i < 10; i++)
-      ASSERT(wait(&x) != -1);
-    ASSERT(wait(&x) == -1);
+      ASSERT(wait(&x, &y) != -1);
+    ASSERT(wait(&x, &y) == -1);
     ASSERT(s3.val == 0);
     ASSERT(get_all_sem(&s4) == 10);
   } break;
   case 9: {
-    int x;
+    int x, y;
     for (int i = 0; i < 10; i++)
       unalertable_wait_sem(&s5);
     for (int i = 0; i < 10; i++)
       post_sem(&s6);
     for (int i = 0; i < 10; i++)
-      ASSERT(wait(&x) != -1);
-    ASSERT(wait(&x) == -1);
+      ASSERT(wait(&x, &y) != -1);
+    ASSERT(wait(&x, &y) == -1);
     ASSERT(s5.val == 0);
     ASSERT(s6.val == 0);
   } break;
@@ -124,8 +124,8 @@ static void proc_test_1() {
     pid[i] = start_proc(p, proc_test_1a, i);
   }
   for (int i = 0; i < 10; i++) {
-    int code, id;
-    id = wait(&code);
+    int code, id, t;
+    id = wait(&code, &t);
     ASSERT(pid[code] == id);
     printk("proc %d exit\n", code);
   }
@@ -138,8 +138,8 @@ void proc_test() {
   int pid = start_proc(p, proc_test_1, 0);
   int t = 0;
   while (1) {
-    int code;
-    int id = wait(&code);
+    int code, a;
+    int id = wait(&code, &a);
     if (id == -1)
       break;
     if (id == pid)

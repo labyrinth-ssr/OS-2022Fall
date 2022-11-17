@@ -30,6 +30,9 @@ define_early_init(rq) {
   init_spinlock(&rqlock);
   init_list_node(&rq);
 }
+void init_schinfo(struct schinfo *p, bool group) {
+  // TODO: initialize your customized schinfo for every newly-created process
+}
 
 define_init(sched) {
   for (int i = 0; i < NCPU; i++) {
@@ -133,6 +136,15 @@ static struct proc *pick_next() {
     return res_proc;
   }
   return cpus[cpuid()].sched.idle;
+}
+void activate_group(struct container *group) {
+  // TODO: add the schinfo node of the group to the schqueue of its parent
+}
+
+static void update_this_state(enum procstate new_state) {
+  // TODO: if using simple_sched, you should implement this routinue
+  // update the state of current process to new_state, and remove it from the
+  // sched queue if new_state=SLEEPING/ZOMBIE
 }
 
 static void update_this_proc(struct proc *p) {
