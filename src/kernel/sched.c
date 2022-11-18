@@ -1,5 +1,6 @@
 #include "common/defines.h"
 #include "common/rbtree.h"
+#include "kernel/container.h"
 #include "kernel/schinfo.h"
 #include <aarch64/intrinsic.h>
 #include <common/string.h>
@@ -15,6 +16,7 @@ extern bool panic_flag;
 
 extern void swtch(KernelContext *new_ctx, KernelContext **old_ctx);
 extern struct proc root_proc;
+extern struct container root_container;
 
 static SpinLock rqlock;
 // static ListNode rq;
@@ -68,7 +70,7 @@ void init_schinfo(struct schinfo *p, bool group) {
 
 void init_schqueue(struct schqueue *s) {
   // init_list_node(&s->rq);
-  memset(s, 0, sizeof(struct schqueue));
+  s->rq.rb_node = NULL;
 }
 
 void _acquire_sched_lock() { _acquire_spinlock(&rqlock); }
@@ -108,6 +110,8 @@ bool _activate_proc(struct proc *p, bool onalert) {
     p->state = RUNNABLE;
     // p->schinfo.prio = 100;
     // _insert_into_list(&p->container->schqueue.rq, &p->schinfo.rq);
+    printk("root container %p\n", &root_container);
+    printk("pid %d insert container %p\n", p->pid, p->container);
     ASSERT(_rb_insert(&p->schinfo.rq, &p->container->schqueue.rq,
                       __sched_cmp) == 0);
 
@@ -123,9 +127,12 @@ static void update_this_state(enum procstate new_state) {
   // sched queue if new_state=SLEEPING/ZOMBIE
   auto this = thisproc();
   this->state = new_state;
+  printk("pid %d new stater %d\n", thisproc()->pid, thisproc()->state);
   if (new_state == SLEEPING || new_state == ZOMBIE) {
     // _detach_from_list(&this->schinfo.rq);
     _rb_erase(&this->schinfo.rq, &this->container->schqueue.rq);
+    printk("pid %d insert container %p\n", thisproc()->pid,
+           thisproc()->container);
   }
   // else if (new_state == RUNNABLE) {
   //   this->schinfo.prio = 0;
@@ -164,17 +171,25 @@ static struct proc *pick_next() {
   //   }
   // return res_proc;
   // }
-
+  //应该不存在时间片耗尽仍在first的情况
+  struct proc *res_proc = NULL;
   rb_node get_node;
-  auto this_rq = thisproc()->container->schqueue.rq;
+  rb_root this_rq = &root_container.schqueue.rq;
   while (1) {
-    get_node = _rb_first(*(rb_root *)&this_rq);
-    auto this_proc = container_of(get_node, struct proc, schinfo.rq);
-    if (this_proc->schinfo.group) {
-      this_rq = this_proc->container->schqueue.rq;
-    } else {
-      return this_proc;
+    get_node = _rb_first(this_rq);
+    if (get_node == NULL) {
+      break;
     }
+    auto candidate_proc = container_of(get_node, struct proc, schinfo.rq);
+    if (candidate_proc->schinfo.group) {
+      this_rq = &res_proc->container->schqueue.rq;
+    } else if (candidate_proc->state == RUNNABLE) {
+      res_proc = candidate_proc;
+      break;
+    }
+  }
+  if (res_proc != NULL) {
+    return res_proc;
   }
 
   return cpus[cpuid()].sched.idle;
@@ -201,6 +216,7 @@ static void update_this_proc(struct proc *p) {
 // A simple scheduler.
 // You are allowed to replace it with whatever you like.
 static void simple_sched(enum procstate new_state) {
+  printk("sched %d,cpu%d\n", thisproc()->pid, cpuid());
   auto this = thisproc();
   ASSERT(this->state == RUNNING);
   if (this->killed && new_state != ZOMBIE) {
@@ -210,6 +226,8 @@ static void simple_sched(enum procstate new_state) {
   update_this_state(new_state);
   auto next = pick_next();
   update_this_proc(next);
+  printk("cpu%d next proc%p,pid:%d,state:%d,idle?:%d\n", cpuid(), next,
+         next->pid, next->state, next->idle);
   ASSERT(next->state == RUNNABLE);
   next->state = RUNNING;
   if (next != this) {
