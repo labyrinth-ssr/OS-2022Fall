@@ -1,4 +1,8 @@
+#include "common/defines.h"
+#include "common/rbtree.h"
+#include "kernel/schinfo.h"
 #include <aarch64/intrinsic.h>
+#include <common/string.h>
 #include <driver/clock.h>
 #include <kernel/cpu.h>
 #include <kernel/init.h>
@@ -13,25 +17,33 @@ extern void swtch(KernelContext *new_ctx, KernelContext **old_ctx);
 extern struct proc root_proc;
 
 static SpinLock rqlock;
-static ListNode rq;
-extern bool panic_flag;
+// static ListNode rq;
 static struct timer sched_timer[4];
 static bool sched_timer_set[4];
 
+static bool __sched_cmp(rb_node lnode, rb_node rnode) {
+  i64 d = container_of(lnode, struct proc, schinfo.rq)->schinfo.vruntime -
+          container_of(rnode, struct proc, schinfo.rq)->schinfo.vruntime;
+  if (d < 0)
+    return true;
+  if (d == 0)
+    return lnode < rnode;
+  return false;
+}
+
 static void sched_timer_handler(struct timer *t) {
-  (void)t;
+  // (void)t;
   if (t->triggered) {
     set_cpu_timer(&sched_timer[cpuid()]);
-    yield();
+    if (thisproc()->schinfo.vruntime >= thisproc()->schinfo.permit_time) {
+      yield();
+    }
   }
 }
 
 define_early_init(rq) {
   init_spinlock(&rqlock);
-  init_list_node(&rq);
-}
-void init_schinfo(struct schinfo *p, bool group) {
-  // TODO: initialize your customized schinfo for every newly-created process
+  // init_list_node(&rq);
 }
 
 define_init(sched) {
@@ -47,9 +59,16 @@ struct proc *thisproc() {
   return cpus[cpuid()].sched.thisproc;
 }
 
-void init_schinfo(struct schinfo *p) {
-  init_list_node(&p->rq);
-  p->prio = 5;
+void init_schinfo(struct schinfo *p, bool group) {
+  // TODO: initialize your customized schinfo for every newly-created process
+  memset(p, 0, sizeof(struct schinfo));
+  // init_list_node(&p->rq);
+  p->group = group;
+}
+
+void init_schqueue(struct schqueue *s) {
+  // init_list_node(&s->rq);
+  memset(s, 0, sizeof(struct schqueue));
 }
 
 void _acquire_sched_lock() { _acquire_spinlock(&rqlock); }
@@ -72,20 +91,26 @@ bool is_used(struct proc *p) {
   return r;
 }
 
-bool activate_proc(struct proc *p) {
+bool _activate_proc(struct proc *p, bool onalert) {
   // TODO
   // if the proc->state is RUNNING/RUNNABLE, do nothing
   // if the proc->state if SLEEPING/UNUSED, set the process state to RUNNABLE
   // and add it to the sched queue
   _acquire_sched_lock();
+  if (!onalert && p->state == ZOMBIE) {
+    PANIC();
+  }
   if (p->state == RUNNING || p->state == RUNNABLE) {
     _release_sched_lock();
     return false;
   }
   if (p->state == SLEEPING || p->state == UNUSED) {
     p->state = RUNNABLE;
-    p->schinfo.prio = 100;
-    _insert_into_list(&rq, &p->schinfo.rq);
+    // p->schinfo.prio = 100;
+    // _insert_into_list(&p->container->schqueue.rq, &p->schinfo.rq);
+    ASSERT(_rb_insert(&p->schinfo.rq, &p->container->schqueue.rq,
+                      __sched_cmp) == 0);
+
   } else if (p->state == ZOMBIE) {
     return false;
   }
@@ -94,57 +119,71 @@ bool activate_proc(struct proc *p) {
 }
 
 static void update_this_state(enum procstate new_state) {
+  // update the state of current process to new_state, and remove it from the
+  // sched queue if new_state=SLEEPING/ZOMBIE
   auto this = thisproc();
   this->state = new_state;
   if (new_state == SLEEPING || new_state == ZOMBIE) {
-    _detach_from_list(&this->schinfo.rq);
-  } else if (new_state == RUNNABLE) {
-    this->schinfo.prio = 0;
+    // _detach_from_list(&this->schinfo.rq);
+    _rb_erase(&this->schinfo.rq, &this->container->schqueue.rq);
   }
+  // else if (new_state == RUNNABLE) {
+  //   this->schinfo.prio = 0;
+  // }
 }
 
 static struct proc *pick_next() {
   if (panic_flag) {
     return cpus[cpuid()].sched.idle;
   }
-  int cnt = 0;
-  struct proc *res_proc = NULL;
-  (void)res_proc;
-  int max_prior = 0;
-  (void)max_prior;
-  _for_in_list(p, &rq) {
-    if (p == &rq) {
-      continue;
-    }
-    auto proc = container_of(p, struct proc, schinfo.rq);
-    cnt++;
-    if (proc->state == RUNNABLE && proc->schinfo.prio >= max_prior) {
-      max_prior = proc->schinfo.prio;
-      res_proc = proc;
+
+  // (void)res_proc;
+  // int max_prior = 0;
+  // (void)max_prior;
+  // _for_in_list(p, &thisproc()->container->schqueue.rq) {
+  //   if (p == &thisproc()->container->schqueue.rq) {
+  //     continue;
+  //   }
+  //   auto proc = container_of(p, struct proc, schinfo.rq);
+  //   cnt++;
+  //   if (proc->state == RUNNABLE && proc->schinfo.prio >= max_prior) {
+  //     max_prior = proc->schinfo.prio;
+  //     res_proc = proc;
+  //   }
+  // }
+
+  // if (res_proc != NULL) {
+  //   _for_in_list(p, &thisproc()->container->schqueue.rq) {
+  //     if (p == &thisproc()->container->schqueue.rq) {
+  //       continue;
+  //     }
+  //     auto proc = container_of(p, struct proc, schinfo.rq);
+  //     if (proc->state == RUNNABLE && proc != res_proc) {
+  //       proc->schinfo.prio++;
+  //     }
+  //   }
+  // return res_proc;
+  // }
+
+  rb_node get_node;
+  auto this_rq = thisproc()->container->schqueue.rq;
+  while (1) {
+    get_node = _rb_first(*(rb_root *)&this_rq);
+    auto this_proc = container_of(get_node, struct proc, schinfo.rq);
+    if (this_proc->schinfo.group) {
+      this_rq = this_proc->container->schqueue.rq;
+    } else {
+      return this_proc;
     }
   }
-  if (res_proc != NULL) {
-    _for_in_list(p, &rq) {
-      if (p == &rq) {
-        continue;
-      }
-      auto proc = container_of(p, struct proc, schinfo.rq);
-      if (proc->state == RUNNABLE && proc != res_proc) {
-        proc->schinfo.prio++;
-      }
-    }
-    return res_proc;
-  }
+
   return cpus[cpuid()].sched.idle;
 }
+
 void activate_group(struct container *group) {
   // TODO: add the schinfo node of the group to the schqueue of its parent
-}
-
-static void update_this_state(enum procstate new_state) {
-  // TODO: if using simple_sched, you should implement this routinue
-  // update the state of current process to new_state, and remove it from the
-  // sched queue if new_state=SLEEPING/ZOMBIE
+  ASSERT(
+      _rb_insert(&group->schinfo.rq, &group->parent->schqueue.rq, __sched_cmp));
 }
 
 static void update_this_proc(struct proc *p) {
@@ -175,6 +214,8 @@ static void simple_sched(enum procstate new_state) {
   next->state = RUNNING;
   if (next != this) {
     attach_pgdir(&next->pgdir);
+    next->schinfo.start_time = get_timestamp_ms();
+    this->schinfo.vruntime += get_timestamp_ms() - this->schinfo.start_time;
     swtch(next->kcontext, &this->kcontext);
     attach_pgdir(&this->pgdir);
   }

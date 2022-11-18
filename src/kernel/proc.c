@@ -1,4 +1,6 @@
+#include "common/defines.h"
 #include "common/sem.h"
+#include "common/spinlock.h"
 #include <common/list.h>
 #include <common/string.h>
 #include <kernel/init.h>
@@ -7,26 +9,20 @@
 #include <kernel/proc.h>
 #include <kernel/sched.h>
 
-#define PID_NUM 1000
-
 struct proc root_proc;
+extern struct container root_container;
 
 void kernel_entry();
 void proc_entry();
 static SpinLock plock;
 
-struct pid_pool {
-  int freelist[PID_NUM];
-  int avail;
-};
-
-static struct pid_pool pids;
+static struct pid_pool global_pids;
 
 define_early_init(plock) {
   init_spinlock(&plock);
-  pids.avail = 1;
+  global_pids.avail = 1;
   for (int i = 0; i < PID_NUM; i++) {
-    pids.freelist[i] = i;
+    global_pids.freelist[i] = i;
   }
 }
 
@@ -47,10 +43,12 @@ NO_RETURN void exit(int code) {
   // 4. notify the parent
   // 5. sched(ZOMBIE)
   // NOTE: be careful of concurrency
-
   setup_checker(0);
   _acquire_spinlock(&plock);
   auto this = thisproc();
+
+  ASSERT(this != this->container->rootproc && !this->idle);
+
   this->exitcode = code;
   _for_in_list(rcp, &this->children) {
     if (rcp == &this->children) {
@@ -58,27 +56,32 @@ NO_RETURN void exit(int code) {
     }
     auto rc = container_of(rcp, struct proc, ptnode);
     if (is_zombie(rc)) {
-      post_sem(&root_proc.childexit);
+      post_sem(&this->container->rootproc->childexit);
     }
   }
+
   if (!_empty_list(&this->children)) {
     _for_in_list(rcp, &this->children) {
       if (rcp == &this->children) {
         continue;
       }
       auto rc = container_of(rcp, struct proc, ptnode);
-      rc->parent = &root_proc;
+      rc->parent = this->container->rootproc;
     }
     auto merged_list = this->children.next;
     _detach_from_list(&this->children);
-    _merge_list(merged_list, &root_proc.children);
+    _merge_list(merged_list, &this->container->rootproc->children);
   }
+
   free_pgdir(&this->pgdir);
   post_sem(&this->parent->childexit);
   lock_for_sched(0);
-  pids.freelist[--pids.avail] = this->pid;
+  global_pids.freelist[--global_pids.avail] = this->pid;
+
   _release_spinlock(&plock);
+
   sched(0, ZOMBIE);
+
   PANIC(); // prevent the warning of 'no_return function returns'
 }
 
@@ -89,6 +92,7 @@ int wait(int *exitcode, int *pid) {
   // 2. wait for childexit
   // 3. if any child exits, clean it up and return its local pid and exitcode
   // NOTE: be careful of concurrency
+
   _acquire_spinlock(&plock);
   auto this = thisproc();
   if (_empty_list(&this->children)) {
@@ -107,12 +111,16 @@ int wait(int *exitcode, int *pid) {
     }
     auto child = container_of(c, struct proc, ptnode);
     if (is_zombie(child)) {
-      auto pid = child->pid;
+      auto cpid = child->pid;
       *exitcode = child->exitcode;
+      *pid = child->localpid;
+      child->container->pids->freelist[--child->container->pids->avail] =
+          child->localpid;
+
       _detach_from_list(&child->ptnode);
       kfree(child);
       _release_spinlock(&plock);
-      return pid;
+      return cpid;
     }
   }
   PANIC();
@@ -176,7 +184,8 @@ int start_proc(struct proc *p, void (*entry)(u64), u64 arg) {
   p->kcontext->lr = (u64)&proc_entry;
   p->kcontext->x0 = (u64)entry;
   p->kcontext->x1 = (u64)arg;
-  int id = p->pid;
+  int id = p->container->pids->freelist[p->container->pids->avail++];
+  p->localpid = id;
   activate_proc(p);
   _release_spinlock(&plock);
   return id;
@@ -185,13 +194,14 @@ int start_proc(struct proc *p, void (*entry)(u64), u64 arg) {
 void init_proc(struct proc *p) {
   _acquire_spinlock(&plock);
   memset(p, 0, sizeof(*p));
-  p->pid = pids.freelist[pids.avail++];
+  p->pid = global_pids.freelist[global_pids.avail++];
+  p->container = &root_container;
   init_sem(&p->childexit, 0);
   init_list_node(&p->children);
   init_list_node(&p->ptnode);
   init_pgdir(&p->pgdir);
   p->kstack = kalloc_page();
-  init_schinfo(&p->schinfo);
+  init_schinfo(&p->schinfo, false);
   p->kcontext = (KernelContext *)((u64)p->kstack + PAGE_SIZE - 16 -
                                   sizeof(KernelContext) - sizeof(UserContext));
   p->ucontext =
@@ -220,12 +230,12 @@ define_init(root_proc) {
 
 // }
 
-void sleep(void *chan, SpinLock *lock) {
-  // TODO: lab7 container
-  // release lock and sleep on channel, reacquire lock when awakened
-}
+// void sleep(void *chan, SpinLock *lock) {
+//   // TODO: lab7 container
+//   // release lock and sleep on channel, reacquire lock when awakened
+// }
 
-void wakeup(void *chan) {
-  // TODO lab7 container
-  // wake up all sleeping processses on channel
-}
+// void wakeup(void *chan) {
+//   // TODO lab7 container
+//   // wake up all sleeping processses on channel
+// }

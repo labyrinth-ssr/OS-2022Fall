@@ -1,3 +1,4 @@
+#include "common/defines.h"
 #include <common/sem.h>
 #include <driver/sddef.h>
 #include <kernel/mem.h>
@@ -116,7 +117,7 @@ void sd_init() {
   _release_spinlock(&sdlock);
   init_sem(&rw_done, 0);
   while (save_flag == get_MBR->flags) {
-    wait_sem(&rw_done);
+    ASSERT(wait_sem(&rw_done));
   }
   auto LBA = *(u32 *)((u64)get_MBR->data + 0x1CE + 0x8);
   auto sec_num = *(u32 *)((u64)get_MBR->data + 0x1CE + 0xC);
@@ -257,14 +258,14 @@ void sdrw(buf *b) {
     bufqueue_unlock(&bqueue);
     auto flag_save = b->flags;
     while (flag_save == b->flags) {
-      wait_sem(&rw_done);
+      ASSERT(wait_sem(&rw_done));
     }
   } else {
     auto b_first = bufqueue_front(&bqueue);
     bufqueue_unlock(&bqueue);
     auto flag_save = b_first->flags;
     while (flag_save == b_first->flags) {
-      wait_sem(&rw_done);
+      ASSERT(wait_sem(&rw_done));
     }
   }
 }
