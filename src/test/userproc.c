@@ -82,6 +82,8 @@ static void _create_user_proc(int i) {
 static int _wait_user_proc() {
   int code, id = -1, pid, lpid;
   lpid = wait(&code, &pid);
+  printk("pid:%d\n", pid);
+
   ASSERT(lpid != -1);
   for (int j = 0; j < 22; j++) {
     if (pids[j] == pid) {

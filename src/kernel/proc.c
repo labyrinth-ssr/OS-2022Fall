@@ -28,6 +28,7 @@ define_early_init(plock) {
 
 void set_parent_to_this(struct proc *proc) {
   _acquire_spinlock(&plock);
+  // printk("set parent,child:%d,parent:%d\n", proc->pid, thisproc()->pid);
   auto this = thisproc();
   proc->parent = thisproc();
   _insert_into_list(&this->children, &proc->ptnode);
@@ -46,6 +47,7 @@ NO_RETURN void exit(int code) {
   setup_checker(0);
   _acquire_spinlock(&plock);
   auto this = thisproc();
+  // printk("%d exit\n", this->pid);
 
   ASSERT(this != this->container->rootproc && !this->idle);
 
@@ -95,6 +97,7 @@ int wait(int *exitcode, int *pid) {
 
   _acquire_spinlock(&plock);
   auto this = thisproc();
+  // printk("%d wait for child exut\n", this->pid);
   if (_empty_list(&this->children)) {
     _release_spinlock(&plock);
     return -1;
@@ -111,10 +114,10 @@ int wait(int *exitcode, int *pid) {
     }
     auto child = container_of(c, struct proc, ptnode);
     if (is_zombie(child)) {
-      auto cpid = child->pid;
+      auto cpid = child->localpid;
       *exitcode = child->exitcode;
-      *pid = child->localpid;
-      child->container->pids->freelist[--child->container->pids->avail] =
+      *pid = child->pid;
+      child->container->pids.freelist[--child->container->pids.avail] =
           child->localpid;
 
       _detach_from_list(&child->ptnode);
@@ -184,7 +187,7 @@ int start_proc(struct proc *p, void (*entry)(u64), u64 arg) {
   p->kcontext->lr = (u64)&proc_entry;
   p->kcontext->x0 = (u64)entry;
   p->kcontext->x1 = (u64)arg;
-  int id = p->container->pids->freelist[p->container->pids->avail++];
+  int id = p->container->pids.freelist[p->container->pids.avail++];
   p->localpid = id;
   activate_proc(p);
   _release_spinlock(&plock);

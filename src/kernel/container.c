@@ -25,9 +25,9 @@ void init_container(struct container *container) {
   init_schqueue(&container->schqueue);
   // TODO: initialize namespace (local pid allocator)
   init_spinlock(&container->pid_lock);
-  container->pids->avail = 1;
+  container->pids.avail = 1;
   for (int i = 0; i < PID_NUM; i++) {
-    container->pids->freelist[i] = i;
+    container->pids.freelist[i] = i;
   }
 }
 
@@ -41,9 +41,9 @@ struct container *create_container(void (*root_entry)(), u64 arg) {
   new_container->rootproc = rootproc;
   init_schinfo(&new_container->schinfo, true);
   init_schqueue(&new_container->schqueue);
-  new_container->pids->avail = 1;
+  new_container->pids.avail = 1;
   for (int i = 0; i < PID_NUM; i++) {
-    new_container->pids->freelist[i] = i;
+    new_container->pids.freelist[i] = i;
   }
   init_spinlock(&new_container->pid_lock);
 

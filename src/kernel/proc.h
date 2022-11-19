@@ -7,8 +7,6 @@
 #include <kernel/pt.h>
 #include <kernel/schinfo.h>
 
-#define PID_NUM 1000
-
 enum procstate { UNUSED, RUNNABLE, RUNNING, SLEEPING, DEEPSLEEPING, ZOMBIE };
 
 typedef struct UserContext {
@@ -41,11 +39,6 @@ struct proc {
   void *kstack;
   UserContext *ucontext;
   KernelContext *kcontext;
-};
-
-struct pid_pool {
-  int freelist[PID_NUM];
-  int avail;
 };
 
 // void init_proc(struct proc*);

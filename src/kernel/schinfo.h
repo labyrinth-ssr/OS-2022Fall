@@ -8,6 +8,8 @@
 #define ELAPSE 20
 #define MIN_PERMIT 1
 
+// design:时钟中断动态设置。中断间隔就是抢占的时间。
+
 struct proc; // dont include proc.h here
 
 // embedded data for cpus
@@ -37,5 +39,6 @@ struct schinfo {
 struct schqueue {
   // TODO: customize your sched queue
   struct rb_root_ rq;
+  int node_cnt;
   // ListNode rq;
 };

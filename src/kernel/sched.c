@@ -12,6 +12,8 @@
 #include <kernel/proc.h>
 #include <kernel/sched.h>
 
+#define TIMER_ELAPSE 50
+
 extern bool panic_flag;
 
 extern void swtch(KernelContext *new_ctx, KernelContext **old_ctx);
@@ -38,6 +40,11 @@ static void sched_timer_handler(struct timer *t) {
   if (t->triggered) {
     set_cpu_timer(&sched_timer[cpuid()]);
     if (thisproc()->schinfo.vruntime >= thisproc()->schinfo.permit_time) {
+      printk("yield %d,vruntime %lld\n", thisproc()->pid,
+             thisproc()->schinfo.vruntime);
+      _rb_erase(&thisproc()->schinfo.rq, &thisproc()->container->schqueue.rq);
+      ASSERT(_rb_insert(&thisproc()->schinfo.rq,
+                        &thisproc()->container->schqueue.rq, __sched_cmp) == 0);
       yield();
     }
   }
@@ -65,12 +72,14 @@ void init_schinfo(struct schinfo *p, bool group) {
   // TODO: initialize your customized schinfo for every newly-created process
   memset(p, 0, sizeof(struct schinfo));
   // init_list_node(&p->rq);
+  p->vruntime = 0;
   p->group = group;
 }
 
 void init_schqueue(struct schqueue *s) {
   // init_list_node(&s->rq);
   s->rq.rb_node = NULL;
+  s->node_cnt = 0;
 }
 
 void _acquire_sched_lock() { _acquire_spinlock(&rqlock); }
@@ -106,14 +115,17 @@ bool _activate_proc(struct proc *p, bool onalert) {
     _release_sched_lock();
     return false;
   }
-  if (p->state == SLEEPING || p->state == UNUSED) {
+  if (p->state == SLEEPING || p->state == UNUSED || p->state == DEEPSLEEPING) {
     p->state = RUNNABLE;
     // p->schinfo.prio = 100;
     // _insert_into_list(&p->container->schqueue.rq, &p->schinfo.rq);
-    printk("root container %p\n", &root_container);
-    printk("pid %d insert container %p\n", p->pid, p->container);
+    // printk("root container %p\n", &root_container);
+    // printk("pid %d insert container %p\n", p->pid, p->container);
+    printk("proc insert node %p,root %p", &p->schinfo.rq,
+           &p->container->schqueue.rq);
     ASSERT(_rb_insert(&p->schinfo.rq, &p->container->schqueue.rq,
                       __sched_cmp) == 0);
+    p->container->schqueue.node_cnt++;
 
   } else if (p->state == ZOMBIE) {
     return false;
@@ -127,12 +139,18 @@ static void update_this_state(enum procstate new_state) {
   // sched queue if new_state=SLEEPING/ZOMBIE
   auto this = thisproc();
   this->state = new_state;
-  printk("pid %d new stater %d\n", thisproc()->pid, thisproc()->state);
-  if (new_state == SLEEPING || new_state == ZOMBIE) {
+  // printk("pid %d new state %d\n", thisproc()->pid, thisproc()->state);
+  if (new_state == SLEEPING || new_state == ZOMBIE ||
+      new_state == DEEPSLEEPING) {
     // _detach_from_list(&this->schinfo.rq);
     _rb_erase(&this->schinfo.rq, &this->container->schqueue.rq);
-    printk("pid %d insert container %p\n", thisproc()->pid,
-           thisproc()->container);
+    this->container->schqueue.node_cnt--;
+    ASSERT(this->container->schqueue.node_cnt >= 0);
+    // printk("%d sleeping or zombie:%d,tree remain:%d\n", this->pid, new_state,
+    //        this->container->schqueue.node_cnt);
+    // this->container->schinfo.permit_time = MAX(TIMER_ELAPSE, _b)
+    // printk("pid %d insert container %p\n", thisproc()->pid,
+    //        thisproc()->container);
   }
   // else if (new_state == RUNNABLE) {
   //   this->schinfo.prio = 0;
@@ -181,10 +199,14 @@ static struct proc *pick_next() {
       break;
     }
     auto candidate_proc = container_of(get_node, struct proc, schinfo.rq);
+    printk("first proc is:%d,state %d\n", candidate_proc->pid,
+           candidate_proc->state);
     if (candidate_proc->schinfo.group) {
       this_rq = &res_proc->container->schqueue.rq;
-    } else if (candidate_proc->state == RUNNABLE) {
-      res_proc = candidate_proc;
+    } else {
+      if (candidate_proc->state == RUNNABLE) {
+        res_proc = candidate_proc;
+      }
       break;
     }
   }
@@ -197,14 +219,17 @@ static struct proc *pick_next() {
 
 void activate_group(struct container *group) {
   // TODO: add the schinfo node of the group to the schqueue of its parent
-  ASSERT(
-      _rb_insert(&group->schinfo.rq, &group->parent->schqueue.rq, __sched_cmp));
+  printk("group insert node %p,root %p,node vruntime:%lld\n",
+         &group->schinfo.rq, &group->parent->schqueue.rq,
+         group->schinfo.vruntime);
+  ASSERT(_rb_insert(&group->schinfo.rq, &group->parent->schqueue.rq,
+                    __sched_cmp) == 0);
 }
 
 static void update_this_proc(struct proc *p) {
 
   if (p->pid != 0 && p != &root_proc && !sched_timer_set[cpuid()]) {
-    sched_timer[cpuid()].elapse = 1;
+    sched_timer[cpuid()].elapse = TIMER_ELAPSE;
     sched_timer[cpuid()].handler = sched_timer_handler;
     set_cpu_timer(&sched_timer[cpuid()]);
     sched_timer_set[cpuid()] = true;
@@ -216,7 +241,11 @@ static void update_this_proc(struct proc *p) {
 // A simple scheduler.
 // You are allowed to replace it with whatever you like.
 static void simple_sched(enum procstate new_state) {
-  printk("sched %d,cpu%d\n", thisproc()->pid, cpuid());
+  if (thisproc()->pid != 0) {
+    printk("sched %d,cpu%d\n", thisproc()->pid, cpuid());
+  } else {
+    printk("idle... ");
+  }
   auto this = thisproc();
   ASSERT(this->state == RUNNING);
   if (this->killed && new_state != ZOMBIE) {
@@ -226,14 +255,18 @@ static void simple_sched(enum procstate new_state) {
   update_this_state(new_state);
   auto next = pick_next();
   update_this_proc(next);
-  printk("cpu%d next proc%p,pid:%d,state:%d,idle?:%d\n", cpuid(), next,
-         next->pid, next->state, next->idle);
+  // printk("cpu%d next proc%p,pid:%d,state:%d,idle?:%d\n", cpuid(), next,
+  //        next->pid, next->state, next->idle);
   ASSERT(next->state == RUNNABLE);
   next->state = RUNNING;
+  this->schinfo.vruntime += get_timestamp_ms() - this->schinfo.start_time;
+  if (!this->idle && this == this->container->rootproc) {
+    this->container->schinfo.vruntime = this->schinfo.vruntime;
+  }
   if (next != this) {
     attach_pgdir(&next->pgdir);
     next->schinfo.start_time = get_timestamp_ms();
-    this->schinfo.vruntime += get_timestamp_ms() - this->schinfo.start_time;
+    printk("%d vruntime %lld\n", this->pid, this->schinfo.vruntime);
     swtch(next->kcontext, &this->kcontext);
     attach_pgdir(&this->pgdir);
   }
