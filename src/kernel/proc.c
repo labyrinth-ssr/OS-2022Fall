@@ -28,7 +28,7 @@ define_early_init(plock) {
 
 void set_parent_to_this(struct proc *proc) {
   _acquire_spinlock(&plock);
-  // printk("set parent,child:%d,parent:%d\n", proc->pid, thisproc()->pid);
+  printk("set parent,child:%d,parent:%d\n", proc->pid, thisproc()->pid);
   auto this = thisproc();
   proc->parent = thisproc();
   _insert_into_list(&this->children, &proc->ptnode);
@@ -58,6 +58,8 @@ NO_RETURN void exit(int code) {
     }
     auto rc = container_of(rcp, struct proc, ptnode);
     if (is_zombie(rc)) {
+      printk("post root %d,sem %d\n", rc->pid,
+             this->container->rootproc->childexit.val + 1);
       post_sem(&this->container->rootproc->childexit);
     }
   }
@@ -69,6 +71,7 @@ NO_RETURN void exit(int code) {
       }
       auto rc = container_of(rcp, struct proc, ptnode);
       rc->parent = this->container->rootproc;
+      printk("move child %dto root", rc->pid);
     }
     auto merged_list = this->children.next;
     _detach_from_list(&this->children);
@@ -99,8 +102,18 @@ int wait(int *exitcode, int *pid) {
   auto this = thisproc();
   // printk("%d wait for child exut\n", this->pid);
   if (_empty_list(&this->children)) {
+
     _release_spinlock(&plock);
     return -1;
+  }
+  if (this->pid == 1) {
+    _for_in_list(cp, &this->children) {
+      if (cp == &this->children) {
+        continue;
+      }
+      auto child = container_of(cp, struct proc, ptnode);
+      printk("child:%d ", child->pid);
+    }
   }
   _release_spinlock(&plock);
   auto wait_sem_ret = wait_sem(&this->childexit);

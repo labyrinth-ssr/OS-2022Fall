@@ -65,7 +65,7 @@ static void sched_timer_handler(struct timer *t) {
           ASSERT(_rb_insert(&container->schinfo.rq,
                             &container->parent->schqueue.rq, __sched_cmp) == 0);
 
-          printk("reinsert container %p\n", container);
+          // printk("reinsert container %p\n", container);
         }
         // else {
         // printk("container %p parent null")
@@ -164,23 +164,27 @@ static void update_this_state(enum procstate new_state) {
   // update the state of current process to new_state, and remove it from the
   // sched queue if new_state=SLEEPING/ZOMBIE
   auto this = thisproc();
-  this->state = new_state;
   // printk("pid %d new state %d\n", thisproc()->pid, thisproc()->state);
-  if (new_state == SLEEPING || new_state == ZOMBIE ||
-      new_state == DEEPSLEEPING) {
-    // _detach_from_list(&this->schinfo.rq);
-    // _rb_erase(&this->schinfo.rq, &this->container->schqueue.rq);
-    // this->container->schqueue.node_cnt--;
-    // ASSERT(this->container->schqueue.node_cnt >= 0);
-    // printk("%d sleeping or zombie:%d,tree remain:%d\n", this->pid, new_state,
-    //        this->container->schqueue.node_cnt);
-    // this->container->schinfo.permit_time = MAX(TIMER_ELAPSE, _b)
-    // printk("pid %d insert container %p\n", thisproc()->pid,
-    //        thisproc()->container);
+  // if (new_state == SLEEPING || new_state == ZOMBIE ||
+  //     new_state == DEEPSLEEPING) {
+  //   // _detach_from_list(&this->schinfo.rq);
+  //   // _rb_erase(&this->schinfo.rq, &this->container->schqueue.rq);
+  //   // this->container->schqueue.node_cnt--;
+  //   // ASSERT(this->container->schqueue.node_cnt >= 0);
+  //   // printk("%d sleeping or zombie:%d,tree remain:%d\n", this->pid,
+  //   new_state,
+  //   //        this->container->schqueue.node_cnt);
+  //   // this->container->schinfo.permit_time = MAX(TIMER_ELAPSE, _b)
+  //   // printk("pid %d insert container %p\n", thisproc()->pid,
+  //   //        thisproc()->container);
+  // } else
+  if (!this->idle && this->state == RUNNING && new_state == RUNNABLE) {
+    printk("sched runnable %d\n", this->pid);
+    ASSERT(_rb_insert(&this->schinfo.rq, &this->container->schqueue.rq,
+                      __sched_cmp) == 0);
+    this->container->schqueue.node_cnt++;
   }
-  // else if (new_state == RUNNABLE) {
-  //   this->schinfo.prio = 0;
-  // }
+  this->state = new_state;
 }
 
 rb_node _rb_first_ex(rb_root root) {

@@ -131,6 +131,7 @@ static void proc_test_1() {
   }
   printk("before exit\n");
   exit(0);
+  printk("after exit\n");
 }
 
 void proc_test() {
