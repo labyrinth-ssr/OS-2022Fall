@@ -15,15 +15,19 @@ extern struct container root_container;
 void kernel_entry();
 void proc_entry();
 static SpinLock plock;
+SpinLock pid_lock;
 
 static struct pid_pool global_pids;
 
 define_early_init(plock) {
   init_spinlock(&plock);
+  init_spinlock(&pid_lock);
+  _acquire_spinlock(&pid_lock);
   global_pids.avail = 1;
   for (int i = 0; i < PID_NUM; i++) {
     global_pids.freelist[i] = i;
   }
+  _release_spinlock(&pid_lock);
 }
 
 void set_parent_to_this(struct proc *proc) {
@@ -81,7 +85,9 @@ NO_RETURN void exit(int code) {
   free_pgdir(&this->pgdir);
   post_sem(&this->parent->childexit);
   lock_for_sched(0);
+  _acquire_spinlock(&pid_lock);
   global_pids.freelist[--global_pids.avail] = this->pid;
+  _release_spinlock(&pid_lock);
 
   _release_spinlock(&plock);
 
@@ -127,16 +133,16 @@ int wait(int *exitcode, int *pid) {
     }
     auto child = container_of(c, struct proc, ptnode);
     if (is_zombie(child)) {
-      auto cpid = child->localpid;
+      auto lpid = child->localpid;
       *exitcode = child->exitcode;
       *pid = child->pid;
-      child->container->pids.freelist[--child->container->pids.avail] =
-          child->localpid;
-
+      _acquire_spinlock(&child->container->pid_lock);
+      child->container->pids.freelist[--child->container->pids.avail] = lpid;
+      _release_spinlock(&child->container->pid_lock);
       _detach_from_list(&child->ptnode);
       kfree(child);
       _release_spinlock(&plock);
-      return cpid;
+      return lpid;
     }
   }
   PANIC();
@@ -146,10 +152,10 @@ struct proc *dfs(struct proc *proc, int pid) {
   if (proc->pid == pid && proc->state != UNUSED) {
     return proc;
   } else if (proc->state == UNUSED) {
-    printk("%d unused\n", proc->pid);
+    // printk("%d unused\n", proc->pid);
   }
   if (_empty_list(&proc->children)) {
-    printk("child empty\n");
+    // printk("child empty\n");
     return NULL;
   }
 
@@ -163,7 +169,7 @@ struct proc *dfs(struct proc *proc, int pid) {
       return child_res;
     }
   }
-  printk("can't find child\n");
+  // printk("can't find child\n");
 
   return NULL;
 }
@@ -172,14 +178,17 @@ int kill(int pid) {
   // TODO
   // Set the killed flag of the proc to true and return 0.
   // Return -1 if the pid is invalid (proc not found).
+  printk("to kill %d\n", pid);
   _acquire_spinlock(&plock);
   auto kill_proc = dfs(&root_proc, pid);
   if (kill_proc != NULL) {
     kill_proc->killed = true;
     _release_spinlock(&plock);
+    printk("kill %d\n", pid);
     return 0;
   }
   _release_spinlock(&plock);
+  printk("can't kill %d\n", pid);
   return -1;
 }
 
@@ -204,7 +213,9 @@ int start_proc(struct proc *p, void (*entry)(u64), u64 arg) {
   p->kcontext->lr = (u64)&proc_entry;
   p->kcontext->x0 = (u64)entry;
   p->kcontext->x1 = (u64)arg;
+  _acquire_spinlock(&p->container->pid_lock);
   int id = p->container->pids.freelist[p->container->pids.avail++];
+  _release_spinlock(&p->container->pid_lock);
   p->localpid = id;
   activate_proc(p);
   _release_spinlock(&plock);
@@ -214,7 +225,9 @@ int start_proc(struct proc *p, void (*entry)(u64), u64 arg) {
 void init_proc(struct proc *p) {
   _acquire_spinlock(&plock);
   memset(p, 0, sizeof(*p));
+  _acquire_spinlock(&pid_lock);
   p->pid = global_pids.freelist[global_pids.avail++];
+  _release_spinlock(&pid_lock);
   p->container = &root_container;
   init_sem(&p->childexit, 0);
   init_list_node(&p->children);

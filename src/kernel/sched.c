@@ -43,22 +43,10 @@ static void sched_timer_handler(struct timer *t) {
   // (void)t;
   if (t->triggered) {
     set_cpu_timer(&sched_timer[cpuid()]);
-    // thisproc()->schinfo.vruntime +=
-    //     get_timestamp_ms() - thisproc()->schinfo.start_time;
-    // if (!thisproc()->idle && thisproc() == thisproc()->container->rootproc) {
-    //   thisproc()->container->schinfo.vruntime = thisproc()->schinfo.vruntime;
-    // }
-
     if (thisproc()->schinfo.vruntime >= thisproc()->schinfo.permit_time) {
       if (!thisproc()->idle) {
         _acquire_sched_lock();
-
-        // _rb_erase(&thisproc()->schinfo.rq,
-        // &thisproc()->container->schqueue.rq);
-        // ASSERT(_rb_insert(&thisproc()->schinfo.rq,
-        //                   &thisproc()->container->schqueue.rq,
-        //                   __sched_cmp) == 0);
-        printk("reinsert %d\n", thisproc()->pid);
+        // printk("reinsert %d\n", thisproc()->pid);
 
         auto container = thisproc()->container;
 
@@ -70,9 +58,6 @@ static void sched_timer_handler(struct timer *t) {
 
           // printk("reinsert container %p\n", container);
         }
-        // else {
-        // printk("container %p parent null")
-        // }
         _release_sched_lock();
       }
 
@@ -149,7 +134,7 @@ bool _activate_proc(struct proc *p, bool onalert) {
     // p->schinfo.prio = 100;
     // _insert_into_list(&p->container->schqueue.rq, &p->schinfo.rq);
     // printk("root container %p\n", &root_container);
-    printk("pid %d insert container %p\n", p->pid, p->container);
+    // printk("pid %d insert container %p\n", p->pid, p->container);
     // printk("proc insert node %p,root %p", &p->schinfo.rq,
     //        &p->container->schqueue.rq);
     ASSERT(_rb_insert(&p->schinfo.rq, &p->container->schqueue.rq,
@@ -187,7 +172,7 @@ static void update_this_state(enum procstate new_state) {
     if (!thisproc()->idle && thisproc() == thisproc()->container->rootproc) {
       thisproc()->container->schinfo.vruntime = thisproc()->schinfo.vruntime;
     }
-    printk("sched runnable %d\n", this->pid);
+    // printk("sched runnable %d\n", this->pid);
     ASSERT(_rb_insert(&this->schinfo.rq, &this->container->schqueue.rq,
                       __sched_cmp) == 0);
     this->container->schqueue.node_cnt++;
@@ -239,19 +224,18 @@ static struct proc *pick_next() {
       if (candidate_proc->state == RUNNABLE) {
         // printk("pick %d\n", candidate_proc->pid);
         res_proc = candidate_proc;
-      } else {
-        printk("proc %d state:%d\n", candidate_proc->pid,
-               candidate_proc->state);
-        // printk("running\n");
       }
+      // else {
+      //   printk("proc %d state:%d\n", candidate_proc->pid,
+      //          candidate_proc->state);
+      //   // printk("running\n");
+      // }
       break;
     }
   }
   if (res_proc != NULL) {
-    printk("erase proc %d \n", res_proc->pid);
-    if (res_proc->pid == 7) {
-      printk("break\n");
-    }
+    printk("pick and erase proc %d from container %p\n", res_proc->pid,
+           container_of(this_rq, struct container, schqueue.rq));
     _rb_erase(&res_proc->schinfo.rq, &res_proc->container->schqueue.rq);
     res_proc->container->schqueue.node_cnt--;
     ASSERT(res_proc->container->schqueue.node_cnt >= 0);
@@ -265,7 +249,7 @@ void activate_group(struct container *group) {
   // TODO: add the schinfo node of the group to the schqueue of its parent
   _acquire_sched_lock();
 
-  printk("group insert node %p,root %p,node vruntime:%lld\n",
+  printk("add container %p to parent container%p,node vruntime:%lld\n",
          &group->schinfo.rq, &group->parent->schqueue.rq,
          group->schinfo.vruntime);
   ASSERT(_rb_insert(&group->schinfo.rq, &group->parent->schqueue.rq,
@@ -290,8 +274,8 @@ static void update_this_proc(struct proc *p) {
 static void simple_sched(enum procstate new_state) {
   // printk("root container%p\n", &root_container);
   if (thisproc()->pid != 0) {
-    printk("sched %d,cpu%d,container %p\n", thisproc()->pid, cpuid(),
-           thisproc()->container);
+    // printk("sched %d,cpu%d,container %p\n", thisproc()->pid, cpuid(),
+    //        thisproc()->container);
   } else {
     // printk("idle... ");
   }

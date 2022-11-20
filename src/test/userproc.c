@@ -74,6 +74,7 @@ static void _create_user_proc(int i) {
   // p->ucontext->ttbr0 = K2P(p->pgdir.pt);
   p->ucontext->spsr = 0;
   pids[i] = p->pid;
+  printk("pid[%d]:%d\n", i, p->pid);
   set_parent_to_this(p);
   set_container_to_this(p);
   localpids[i] = start_proc(p, trap_return, 0);
@@ -150,7 +151,7 @@ void container_test() {
   ASSERT(wait_sem(&myrepot_done));
   printk("done\n");
   for (int i = 0; i < 22; i++) {
-    printk("kill %d\n", i);
+    // printk("kill %d\n", i);
     ASSERT(kill(pids[i]) == 0);
   }
   for (int i = 16; i < 22; i++)
