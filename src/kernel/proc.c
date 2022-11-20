@@ -132,9 +132,11 @@ int wait(int *exitcode, int *pid) {
 struct proc *dfs(struct proc *proc, int pid) {
   if (proc->pid == pid && proc->state != UNUSED) {
     return proc;
+  } else if (proc->state == UNUSED) {
+    printk("%d unused\n", proc->pid);
   }
-
   if (_empty_list(&proc->children)) {
+    printk("child empty\n");
     return NULL;
   }
 
@@ -148,6 +150,8 @@ struct proc *dfs(struct proc *proc, int pid) {
       return child_res;
     }
   }
+  printk("can't find child\n");
+
   return NULL;
 }
 

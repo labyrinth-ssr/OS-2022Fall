@@ -35,18 +35,47 @@ static bool __sched_cmp(rb_node lnode, rb_node rnode) {
   return false;
 }
 
+void _acquire_sched_lock() { _acquire_spinlock(&rqlock); }
+
+void _release_sched_lock() { _release_spinlock(&rqlock); }
+
 static void sched_timer_handler(struct timer *t) {
   // (void)t;
   if (t->triggered) {
     set_cpu_timer(&sched_timer[cpuid()]);
+    thisproc()->schinfo.vruntime +=
+        get_timestamp_ms() - thisproc()->schinfo.start_time;
+    if (!thisproc()->idle && thisproc() == thisproc()->container->rootproc) {
+      thisproc()->container->schinfo.vruntime = thisproc()->schinfo.vruntime;
+    }
+
     if (thisproc()->schinfo.vruntime >= thisproc()->schinfo.permit_time) {
-      printk("yield %d,vruntime %lld\n", thisproc()->pid,
-             thisproc()->schinfo.vruntime);
-      _rb_erase(&thisproc()->schinfo.rq, &thisproc()->container->schqueue.rq);
-      ASSERT(_rb_insert(&thisproc()->schinfo.rq,
-                        &thisproc()->container->schqueue.rq, __sched_cmp) == 0);
+      if (!thisproc()->idle) {
+        _acquire_sched_lock();
+        _rb_erase(&thisproc()->schinfo.rq, &thisproc()->container->schqueue.rq);
+        ASSERT(_rb_insert(&thisproc()->schinfo.rq,
+                          &thisproc()->container->schqueue.rq,
+                          __sched_cmp) == 0);
+
+        auto container = thisproc()->container;
+
+        if (container != &root_container) {
+          _rb_erase(&container->schinfo.rq, &container->parent->schqueue.rq);
+          // printk("erase done\n");
+          ASSERT(_rb_insert(&container->schinfo.rq,
+                            &container->parent->schqueue.rq, __sched_cmp) == 0);
+
+          printk("reinsert container %p\n", container);
+        }
+        // else {
+        // printk("container %p parent null")
+        // }
+        _release_sched_lock();
+      }
+
       yield();
     }
+    // _release_sched_lock();
   }
 }
 
@@ -82,10 +111,6 @@ void init_schqueue(struct schqueue *s) {
   s->node_cnt = 0;
 }
 
-void _acquire_sched_lock() { _acquire_spinlock(&rqlock); }
-
-void _release_sched_lock() { _release_spinlock(&rqlock); }
-
 bool is_zombie(struct proc *p) {
   bool r;
   _acquire_sched_lock();
@@ -108,9 +133,10 @@ bool _activate_proc(struct proc *p, bool onalert) {
   // if the proc->state if SLEEPING/UNUSED, set the process state to RUNNABLE
   // and add it to the sched queue
   _acquire_sched_lock();
-  if (!onalert && p->state == ZOMBIE) {
-    PANIC();
-  }
+  (void)onalert;
+  // if (!onalert && p->state == ZOMBIE) {
+  //   PANIC();
+  // }
   if (p->state == RUNNING || p->state == RUNNABLE) {
     _release_sched_lock();
     return false;
@@ -120,9 +146,9 @@ bool _activate_proc(struct proc *p, bool onalert) {
     // p->schinfo.prio = 100;
     // _insert_into_list(&p->container->schqueue.rq, &p->schinfo.rq);
     // printk("root container %p\n", &root_container);
-    // printk("pid %d insert container %p\n", p->pid, p->container);
-    printk("proc insert node %p,root %p", &p->schinfo.rq,
-           &p->container->schqueue.rq);
+    printk("pid %d insert container %p\n", p->pid, p->container);
+    // printk("proc insert node %p,root %p", &p->schinfo.rq,
+    //        &p->container->schqueue.rq);
     ASSERT(_rb_insert(&p->schinfo.rq, &p->container->schqueue.rq,
                       __sched_cmp) == 0);
     p->container->schqueue.node_cnt++;
@@ -143,9 +169,9 @@ static void update_this_state(enum procstate new_state) {
   if (new_state == SLEEPING || new_state == ZOMBIE ||
       new_state == DEEPSLEEPING) {
     // _detach_from_list(&this->schinfo.rq);
-    _rb_erase(&this->schinfo.rq, &this->container->schqueue.rq);
-    this->container->schqueue.node_cnt--;
-    ASSERT(this->container->schqueue.node_cnt >= 0);
+    // _rb_erase(&this->schinfo.rq, &this->container->schqueue.rq);
+    // this->container->schqueue.node_cnt--;
+    // ASSERT(this->container->schqueue.node_cnt >= 0);
     // printk("%d sleeping or zombie:%d,tree remain:%d\n", this->pid, new_state,
     //        this->container->schqueue.node_cnt);
     // this->container->schinfo.permit_time = MAX(TIMER_ELAPSE, _b)
@@ -157,73 +183,79 @@ static void update_this_state(enum procstate new_state) {
   // }
 }
 
+rb_node _rb_first_ex(rb_root root) {
+  rb_node n;
+  n = root->rb_node;
+  if (!n)
+    return NULL;
+  while (n->rb_left && !container_of(n->rb_left, struct schinfo, rq)->skip)
+    n = n->rb_left;
+  return n;
+}
+
 static struct proc *pick_next() {
+  // printk("in pick_next");
   if (panic_flag) {
     return cpus[cpuid()].sched.idle;
   }
-
-  // (void)res_proc;
-  // int max_prior = 0;
-  // (void)max_prior;
-  // _for_in_list(p, &thisproc()->container->schqueue.rq) {
-  //   if (p == &thisproc()->container->schqueue.rq) {
-  //     continue;
-  //   }
-  //   auto proc = container_of(p, struct proc, schinfo.rq);
-  //   cnt++;
-  //   if (proc->state == RUNNABLE && proc->schinfo.prio >= max_prior) {
-  //     max_prior = proc->schinfo.prio;
-  //     res_proc = proc;
-  //   }
-  // }
-
-  // if (res_proc != NULL) {
-  //   _for_in_list(p, &thisproc()->container->schqueue.rq) {
-  //     if (p == &thisproc()->container->schqueue.rq) {
-  //       continue;
-  //     }
-  //     auto proc = container_of(p, struct proc, schinfo.rq);
-  //     if (proc->state == RUNNABLE && proc != res_proc) {
-  //       proc->schinfo.prio++;
-  //     }
-  //   }
-  // return res_proc;
-  // }
   //应该不存在时间片耗尽仍在first的情况
   struct proc *res_proc = NULL;
   rb_node get_node;
   rb_root this_rq = &root_container.schqueue.rq;
+  // printk("root container:%d\n", root_container.schinfo.group);
   while (1) {
-    get_node = _rb_first(this_rq);
+    // printk("rb root is %p , from container %p\n", this_rq,
+    //        container_of(this_rq, struct container, schqueue.rq));
+    get_node = _rb_first_ex(this_rq);
+    // }
+    // printk("first node is %p,", get_node);
     if (get_node == NULL) {
+      // printk("tree first null\n");
+      container_of(this_rq, struct container, schqueue.rq)->schinfo.skip = true;
       break;
     }
-    auto candidate_proc = container_of(get_node, struct proc, schinfo.rq);
-    printk("first proc is:%d,state %d\n", candidate_proc->pid,
-           candidate_proc->state);
-    if (candidate_proc->schinfo.group) {
-      this_rq = &res_proc->container->schqueue.rq;
+    struct schinfo *schinfo = container_of(get_node, struct schinfo, rq);
+    // printk("first proc is:%d,state %d\n", candidate_proc->pid,
+    //        candidate_proc->state);
+    if (schinfo->group) {
+      // printk("is group %p\n", container_of(schinfo, struct container,
+      // schinfo));
+      this_rq = &container_of(schinfo, struct container, schinfo)->schqueue.rq;
+      // &((struct container *)candidate_proc)->schqueue.rq;
     } else {
+      struct proc *candidate_proc = container_of(schinfo, struct proc, schinfo);
       if (candidate_proc->state == RUNNABLE) {
+        // printk("pick %d\n", candidate_proc->pid);
         res_proc = candidate_proc;
+      } else {
+        printk("proc %d state:%d\n", candidate_proc->pid,
+               candidate_proc->state);
+        // printk("running\n");
       }
       break;
     }
   }
   if (res_proc != NULL) {
+    printk("erase proc %d \n", res_proc->pid);
+    _rb_erase(&res_proc->schinfo.rq, &res_proc->container->schqueue.rq);
+    res_proc->container->schqueue.node_cnt--;
+    ASSERT(res_proc->container->schqueue.node_cnt >= 0);
     return res_proc;
   }
-
+  // printk("idle...");
   return cpus[cpuid()].sched.idle;
 }
 
 void activate_group(struct container *group) {
   // TODO: add the schinfo node of the group to the schqueue of its parent
+  _acquire_sched_lock();
+
   printk("group insert node %p,root %p,node vruntime:%lld\n",
          &group->schinfo.rq, &group->parent->schqueue.rq,
          group->schinfo.vruntime);
   ASSERT(_rb_insert(&group->schinfo.rq, &group->parent->schqueue.rq,
                     __sched_cmp) == 0);
+  _release_sched_lock();
 }
 
 static void update_this_proc(struct proc *p) {
@@ -241,10 +273,12 @@ static void update_this_proc(struct proc *p) {
 // A simple scheduler.
 // You are allowed to replace it with whatever you like.
 static void simple_sched(enum procstate new_state) {
+  // printk("root container%p\n", &root_container);
   if (thisproc()->pid != 0) {
-    printk("sched %d,cpu%d\n", thisproc()->pid, cpuid());
+    printk("sched %d,cpu%d,container %p\n", thisproc()->pid, cpuid(),
+           thisproc()->container);
   } else {
-    printk("idle... ");
+    // printk("idle... ");
   }
   auto this = thisproc();
   ASSERT(this->state == RUNNING);
@@ -259,14 +293,11 @@ static void simple_sched(enum procstate new_state) {
   //        next->pid, next->state, next->idle);
   ASSERT(next->state == RUNNABLE);
   next->state = RUNNING;
-  this->schinfo.vruntime += get_timestamp_ms() - this->schinfo.start_time;
-  if (!this->idle && this == this->container->rootproc) {
-    this->container->schinfo.vruntime = this->schinfo.vruntime;
-  }
+
   if (next != this) {
     attach_pgdir(&next->pgdir);
     next->schinfo.start_time = get_timestamp_ms();
-    printk("%d vruntime %lld\n", this->pid, this->schinfo.vruntime);
+    // printk("%d vruntime %lld\n", this->pid, this->schinfo.vruntime);
     swtch(next->kcontext, &this->kcontext);
     attach_pgdir(&this->pgdir);
   }

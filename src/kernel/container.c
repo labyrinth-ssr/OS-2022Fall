@@ -1,5 +1,7 @@
+#include "common/rbtree.h"
 #include "common/spinlock.h"
 #include "kernel/proc.h"
+#include "kernel/schinfo.h"
 #include <common/list.h>
 #include <common/string.h>
 #include <kernel/container.h>
@@ -32,8 +34,21 @@ void init_container(struct container *container) {
 }
 
 struct container *create_container(void (*root_entry)(), u64 arg) {
+  // struct container *parent;
+  // struct proc *rootproc;
+
+  // struct schinfo schinfo;
+  // struct schqueue schqueue;
+
+  // // TODO: namespace (local pid?)
+  // SpinLock pid_lock;
+  // struct pid_pool pids;
+
+  // auto res = sizeof(struct schinfo) + sizeof(struct schqueue)
+  // +sizeof(SpinLock) + sizeof(struct pid_pool) ;
   // TODO
   struct container *new_container = kalloc(sizeof(struct container));
+  printk("create container %p\n", new_container);
   memset(new_container, 0, sizeof(struct container));
 
   new_container->parent = thisproc()->container;
@@ -51,6 +66,8 @@ struct container *create_container(void (*root_entry)(), u64 arg) {
   set_parent_to_this(rootproc);
   rootproc->localpid = 0;
   rootproc->container = new_container;
+  // _rb_insert(&rootproc->schinfo.rq, &new_container->schqueue.rq, bool
+  // (*cmp)(rb_node, rb_node))
   start_proc(rootproc, root_entry, arg);
   activate_group(new_container);
 

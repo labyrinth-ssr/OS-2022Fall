@@ -28,6 +28,7 @@ struct schinfo {
   // int running_num;
   u64 start_time;
   u64 vruntime;
+  bool skip;
 
   unsigned long long permit_time; // = Max(ELAPSE/running_num,MIN_PERMIT)
 

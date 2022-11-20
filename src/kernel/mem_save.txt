@@ -224,7 +224,8 @@ void *kalloc(isize size) {
     return objp;
   }
   // avail is zero,refill the entry from global
-  if (NULL != kmem_cache->slabs_partial) {
+  if (kmem_cache->slabs_partial != NULL &&
+      kmem_cache->slabs_partial->prev != NULL) {
     auto ret = alloc_obj(kmem_cache->slabs_partial, size, kmem_cache->num);
     if (kmem_cache->slabs_partial->active >= kmem_cache->num) {
       partial_to_full(kmem_cache, kmem_cache->slabs_partial);
@@ -233,7 +234,7 @@ void *kalloc(isize size) {
     return ret;
   }
 
-  if (NULL != kmem_cache->slabs_free) {
+  if (kmem_cache->slabs_free != NULL && kmem_cache->slabs_free->prev != NULL) {
     auto ret = alloc_obj(kmem_cache->slabs_free, size, kmem_cache->num);
     free_to_partial(kmem_cache, kmem_cache->slabs_free);
     release_spinlock(one, &mem_lock);
@@ -270,7 +271,7 @@ void kfree(void *p) {
   SlabNode *owner_slab = (SlabNode *)PAGE_BASE((u64)p);
   auto kmem_cache = (CacheNode *)owner_slab->owner_cache;
   Array_cache_t *ac = &(kmem_cache->array_cache[cpuid()]);
-  if (ac->avail == AC_LIMIT) {
+  if (ac->avail >= AC_LIMIT) {
     cache_flusharray(ac, kmem_cache);
   }
   ac->entry[ac->avail++] = p;

@@ -129,6 +129,7 @@ static void proc_test_1() {
     ASSERT(pid[code] == id);
     printk("proc %d exit\n", code);
   }
+  printk("before exit\n");
   exit(0);
 }
 

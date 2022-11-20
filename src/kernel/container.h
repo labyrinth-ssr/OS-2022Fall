@@ -3,7 +3,7 @@
 // #include "common/spinlock.h"
 #include <kernel/proc.h>
 #include <kernel/schinfo.h>
-#define PID_NUM 1000
+#define PID_NUM 100
 
 struct pid_pool {
   int freelist[PID_NUM];

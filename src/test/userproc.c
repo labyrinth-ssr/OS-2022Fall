@@ -149,8 +149,10 @@ void container_test() {
     _create_user_proc(i);
   ASSERT(wait_sem(&myrepot_done));
   printk("done\n");
-  for (int i = 0; i < 22; i++)
+  for (int i = 0; i < 22; i++) {
+    printk("kill %d\n", i);
     ASSERT(kill(pids[i]) == 0);
+  }
   for (int i = 16; i < 22; i++)
     ASSERT(_wait_user_proc() >= 16);
   for (int i = 0; i < 4; i++)
