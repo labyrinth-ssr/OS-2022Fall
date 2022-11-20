@@ -43,19 +43,22 @@ static void sched_timer_handler(struct timer *t) {
   // (void)t;
   if (t->triggered) {
     set_cpu_timer(&sched_timer[cpuid()]);
-    thisproc()->schinfo.vruntime +=
-        get_timestamp_ms() - thisproc()->schinfo.start_time;
-    if (!thisproc()->idle && thisproc() == thisproc()->container->rootproc) {
-      thisproc()->container->schinfo.vruntime = thisproc()->schinfo.vruntime;
-    }
+    // thisproc()->schinfo.vruntime +=
+    //     get_timestamp_ms() - thisproc()->schinfo.start_time;
+    // if (!thisproc()->idle && thisproc() == thisproc()->container->rootproc) {
+    //   thisproc()->container->schinfo.vruntime = thisproc()->schinfo.vruntime;
+    // }
 
     if (thisproc()->schinfo.vruntime >= thisproc()->schinfo.permit_time) {
       if (!thisproc()->idle) {
         _acquire_sched_lock();
-        _rb_erase(&thisproc()->schinfo.rq, &thisproc()->container->schqueue.rq);
-        ASSERT(_rb_insert(&thisproc()->schinfo.rq,
-                          &thisproc()->container->schqueue.rq,
-                          __sched_cmp) == 0);
+
+        // _rb_erase(&thisproc()->schinfo.rq,
+        // &thisproc()->container->schqueue.rq);
+        // ASSERT(_rb_insert(&thisproc()->schinfo.rq,
+        //                   &thisproc()->container->schqueue.rq,
+        //                   __sched_cmp) == 0);
+        printk("reinsert %d\n", thisproc()->pid);
 
         auto container = thisproc()->container;
 
@@ -179,6 +182,11 @@ static void update_this_state(enum procstate new_state) {
   //   //        thisproc()->container);
   // } else
   if (!this->idle && this->state == RUNNING && new_state == RUNNABLE) {
+    thisproc()->schinfo.vruntime +=
+        get_timestamp_ms() - thisproc()->schinfo.start_time;
+    if (!thisproc()->idle && thisproc() == thisproc()->container->rootproc) {
+      thisproc()->container->schinfo.vruntime = thisproc()->schinfo.vruntime;
+    }
     printk("sched runnable %d\n", this->pid);
     ASSERT(_rb_insert(&this->schinfo.rq, &this->container->schqueue.rq,
                       __sched_cmp) == 0);
@@ -241,6 +249,9 @@ static struct proc *pick_next() {
   }
   if (res_proc != NULL) {
     printk("erase proc %d \n", res_proc->pid);
+    if (res_proc->pid == 7) {
+      printk("break\n");
+    }
     _rb_erase(&res_proc->schinfo.rq, &res_proc->container->schqueue.rq);
     res_proc->container->schqueue.node_cnt--;
     ASSERT(res_proc->container->schqueue.node_cnt >= 0);
