@@ -20,6 +20,7 @@ struct container {
   // TODO: namespace (local pid?)
   SpinLock pid_lock;
   struct pid_pool pids;
+  int id;
 };
 
 struct container *create_container(void (*root_entry)(), u64 arg);

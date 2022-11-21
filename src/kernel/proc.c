@@ -1,3 +1,4 @@
+#include "aarch64/intrinsic.h"
 #include "common/defines.h"
 #include "common/sem.h"
 #include "common/spinlock.h"
@@ -106,23 +107,25 @@ int wait(int *exitcode, int *pid) {
 
   _acquire_spinlock(&plock);
   auto this = thisproc();
-  // printk("%d wait for child exut\n", this->pid);
+  printk("cpu %d %d wait for child exit\n", cpuid(), this->pid);
   if (_empty_list(&this->children)) {
 
     _release_spinlock(&plock);
     return -1;
   }
-  if (this->pid == 1) {
-    _for_in_list(cp, &this->children) {
-      if (cp == &this->children) {
-        continue;
-      }
-      auto child = container_of(cp, struct proc, ptnode);
-      printk("child:%d ", child->pid);
-    }
-  }
+  // if (this->pid == 1) {
+  //   _for_in_list(cp, &this->children) {
+  //     if (cp == &this->children) {
+  //       continue;
+  //     }
+  //     auto child = container_of(cp, struct proc, ptnode);
+  //     printk("child:%d ", child->pid);
+  //   }
+  // }
   _release_spinlock(&plock);
   auto wait_sem_ret = wait_sem(&this->childexit);
+  printk("cpu %d %d wait return\n", cpuid(), this->pid);
+
   if (!wait_sem_ret) {
     return -1;
   }
@@ -178,17 +181,17 @@ int kill(int pid) {
   // TODO
   // Set the killed flag of the proc to true and return 0.
   // Return -1 if the pid is invalid (proc not found).
-  printk("to kill %d\n", pid);
+  // printk("to kill %d\n", pid);
   _acquire_spinlock(&plock);
   auto kill_proc = dfs(&root_proc, pid);
   if (kill_proc != NULL) {
     kill_proc->killed = true;
     _release_spinlock(&plock);
-    printk("kill %d\n", pid);
+    // printk("kill %d\n", pid);
     return 0;
   }
   _release_spinlock(&plock);
-  printk("can't kill %d\n", pid);
+  // printk("can't kill %d\n", pid);
   return -1;
 }
 

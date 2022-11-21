@@ -75,6 +75,7 @@ struct container *create_container(void (*root_entry)(), u64 arg) {
   // (*cmp)(rb_node, rb_node))
   start_proc(rootproc, root_entry, arg);
   activate_group(new_container);
+  new_container->id = arg;
 
   return new_container;
 }

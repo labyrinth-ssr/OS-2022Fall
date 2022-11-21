@@ -154,10 +154,16 @@ void container_test() {
     // printk("kill %d\n", i);
     ASSERT(kill(pids[i]) == 0);
   }
-  for (int i = 16; i < 22; i++)
+  printk("kill done\n");
+  for (int i = 16; i < 22; i++) {
+    printk("wait %d\n", i);
+
     ASSERT(_wait_user_proc() >= 16);
+  }
+  printk("wait done\n");
   for (int i = 0; i < 4; i++)
     ASSERT(wait_sem(&container_done));
+  printk("wait sem done\n");
   printk("container_test PASS\nRuntime:\n");
   for (int i = 0; i < 4; i++)
     printk("CPU %d: %llu\n", i, cpu_cnt[i]);
