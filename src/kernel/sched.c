@@ -138,16 +138,6 @@ static void update_this_state(enum procstate new_state) {
   this->state = new_state;
 }
 
-rb_node _rb_first_ex(rb_root root) {
-  rb_node n;
-  n = root->rb_node;
-  if (!n)
-    return NULL;
-  while (n->rb_left && !container_of(n->rb_left, struct schinfo, rq)->skip)
-    n = n->rb_left;
-  return n;
-}
-
 rb_node _rb_first_ex_p(rb_node n) {
   rb_node left = NULL;
   if (!n)
@@ -168,9 +158,14 @@ rb_node _rb_first_ex_p(rb_node n) {
   return NULL;
 }
 
-static void _rb_fix_skip(rb_node rt_node) {
+void _rb_fix_skip(rb_node rt_node) {
   if (rt_node != NULL) {
     container_of(rt_node, struct schinfo, rq)->skip = false;
+    struct schinfo *info = container_of(rt_node, struct schinfo, rq);
+    if (info->group) {
+      _rb_fix_skip(
+          container_of(info, struct container, schinfo)->schqueue.rq.rb_node);
+    }
     _rb_fix_skip(rt_node->rb_left);
     _rb_fix_skip(rt_node->rb_right);
   }
@@ -182,13 +177,13 @@ static struct proc *pick_next_r(rb_root rt) {
   }
   rb_node get_node = NULL;
   get_node = _rb_first_ex_p(rt->rb_node);
+  struct container *this_container =
+      container_of(rt, struct container, schqueue.rq);
 
-  if (container_of(rt, struct container, schqueue.rq) != &root_container &&
-      container_of(rt, struct container, schqueue.rq)->schqueue.node_cnt != 0 &&
-      get_node == NULL) {
-    container_of(rt, struct container, schqueue.rq)->schinfo.skip = true;
-    return pick_next_r(
-        &container_of(rt, struct container, schqueue.rq)->parent->schqueue.rq);
+  if (this_container != &root_container &&
+      this_container->schqueue.node_cnt != 0 && get_node == NULL) {
+    this_container->schinfo.skip = true;
+    return pick_next_r(&this_container->parent->schqueue.rq);
   }
 
   if (get_node == NULL) {
