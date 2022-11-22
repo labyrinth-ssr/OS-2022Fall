@@ -42,8 +42,8 @@ void trap_global_handler(UserContext *context) {
   // TODO: stop killed process while returning to user space
   // extern char loop_start[], loop_end[];
   if (!thisproc()->idle && thisproc()->killed) {
-    printk("proc in trap:%d,killed?:%d,user?:%d\n", thisproc()->pid,
-           thisproc()->killed, (KSPACE_MASK & context->elr) == 0);
+    // printk("proc in trap:%d,killed?:%d,user?:%d\n", thisproc()->pid,
+    //        thisproc()->killed, (KSPACE_MASK & context->elr) == 0);
   }
 
   if (thisproc()->killed && (KSPACE_MASK & context->elr) == 0) {

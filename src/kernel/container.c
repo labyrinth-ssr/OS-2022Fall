@@ -51,15 +51,17 @@ struct container *create_container(void (*root_entry)(), u64 arg) {
   // TODO
   struct container *new_container = kalloc(sizeof(struct container));
   init_container(new_container);
-  printk("create container %p\n", new_container);
+  new_container->id = arg;
+
+  // printk("create container %d\n", arg);
   // memset(new_container, 0, sizeof(struct container));
 
   new_container->parent = thisproc()->container;
-  printk("container %lld,ptr %p,parent %p\n", arg, new_container,
-         thisproc()->container);
+  printk("create container %lld,parent %d\n", arg, thisproc()->container->id);
   struct proc *rootproc = create_proc();
+  rootproc->container = new_container;
   new_container->rootproc = rootproc;
-  printk("container %p rootproc %d\n", new_container, rootproc->pid);
+  printk("container %d rootproc %d\n", new_container->id, rootproc->pid);
   // init_schinfo(&new_container->schinfo, true);
   // init_schqueue(&new_container->schqueue);
   // new_container->pids.avail = 1;
@@ -70,17 +72,16 @@ struct container *create_container(void (*root_entry)(), u64 arg) {
   // rootproc lock?
   set_parent_to_this(rootproc);
   // rootproc->localpid = 0;
-  rootproc->container = new_container;
   // _rb_insert(&rootproc->schinfo.rq, &new_container->schqueue.rq, bool
   // (*cmp)(rb_node, rb_node))
   start_proc(rootproc, root_entry, arg);
   activate_group(new_container);
-  new_container->id = arg;
 
   return new_container;
 }
 
 define_early_init(root_container) {
   init_container(&root_container);
+  root_container.id = -1;
   root_container.rootproc = &root_proc;
 }

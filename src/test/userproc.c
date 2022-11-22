@@ -1,3 +1,4 @@
+#include "aarch64/intrinsic.h"
 #include <common/rc.h>
 #include <common/sem.h>
 #include <common/string.h>
@@ -83,7 +84,7 @@ static void _create_user_proc(int i) {
 static int _wait_user_proc() {
   int code, id = -1, pid, lpid;
   lpid = wait(&code, &pid);
-  printk("pid:%d\n", pid);
+  printk("cpu %d pid:%d\n", cpuid(), pid);
 
   ASSERT(lpid != -1);
   for (int j = 0; j < 22; j++) {
@@ -94,7 +95,7 @@ static int _wait_user_proc() {
   }
   ASSERT(id != -1);
   ASSERT(code == -1);
-  printk("proc %d killed\n", id);
+  printk("cpu %d proc %d killed\n", cpuid(), id);
   return id;
 }
 
@@ -129,6 +130,7 @@ static void container_root(int a) {
     _create_user_proc(i);
   for (int i = 0; i < 4; i++)
     ASSERT(_wait_user_proc() / 4 == a);
+  printk("cpu %d before post container\n", cpuid());
   post_sem(&container_done);
   setup_checker(0);
   lock_for_sched(0);
@@ -156,8 +158,6 @@ void container_test() {
   }
   printk("kill done\n");
   for (int i = 16; i < 22; i++) {
-    printk("wait %d\n", i);
-
     ASSERT(_wait_user_proc() >= 16);
   }
   printk("wait done\n");

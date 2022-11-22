@@ -12,7 +12,7 @@
 #include <kernel/proc.h>
 #include <kernel/sched.h>
 
-#define TIMER_ELAPSE 10
+#define TIMER_ELAPSE 50
 
 extern bool panic_flag;
 
@@ -41,6 +41,10 @@ void _release_sched_lock() { _release_spinlock(&rqlock); }
 
 static void sched_timer_handler(struct timer *t) {
   // (void)t;
+  // if (thisproc()->killed) {
+  // printk("proc %d in time inter,killed?:%d\n", thisproc()->pid,
+  //        thisproc()->killed);
+  // }
   if (t->triggered) {
     set_cpu_timer(&sched_timer[cpuid()]);
     if (thisproc()->schinfo.vruntime >= thisproc()->schinfo.permit_time) {
@@ -62,8 +66,12 @@ static void sched_timer_handler(struct timer *t) {
       }
 
       yield();
+    } else {
+      // printk("proc %d not yield\n", thisproc()->pid);
     }
     // _release_sched_lock();
+  } else {
+    // printk("proc %d not triggered\n", thisproc()->pid);
   }
 }
 
@@ -121,28 +129,29 @@ bool _activate_proc(struct proc *p, bool onalert) {
   // if the proc->state if SLEEPING/UNUSED, set the process state to RUNNABLE
   // and add it to the sched queue
   _acquire_sched_lock();
-  (void)onalert;
   // if (!onalert && p->state == ZOMBIE) {
   //   PANIC();
   // }
-  if (p->state == RUNNING || p->state == RUNNABLE) {
+  // printk("activate %d ,onalert?:%d,state:%d\n", p->pid, onalert, p->state);
+  if (p->state == RUNNING || p->state == RUNNABLE || p->state == ZOMBIE ||
+      (p->state == DEEPSLEEPING && onalert)) {
     _release_sched_lock();
     return false;
   }
-  if (p->state == SLEEPING || p->state == UNUSED || p->state == DEEPSLEEPING) {
+  if (p->state == SLEEPING || p->state == UNUSED ||
+      (p->state == DEEPSLEEPING && !onalert)) {
     p->state = RUNNABLE;
     // p->schinfo.prio = 100;
     // _insert_into_list(&p->container->schqueue.rq, &p->schinfo.rq);
     // printk("root container %p\n", &root_container);
     // printk("pid %d insert container %p\n", p->pid, p->container);
-    // printk("proc insert node %p,root %p", &p->schinfo.rq,
-    //        &p->container->schqueue.rq);
     ASSERT(_rb_insert(&p->schinfo.rq, &p->container->schqueue.rq,
                       __sched_cmp) == 0);
     p->container->schqueue.node_cnt++;
-
-  } else if (p->state == ZOMBIE) {
-    return false;
+    // if (p->container->id == 0) {
+    // printk("activate: proc %d to container %d,node cnt:%d\n", p->pid,
+    //        p->container->id, p->container->schqueue.node_cnt);
+    // }
   }
   _release_sched_lock();
   return true;
@@ -172,10 +181,14 @@ static void update_this_state(enum procstate new_state) {
     // if (!thisproc()->idle && thisproc() == thisproc()->container->rootproc) {
     //   thisproc()->container->schinfo.vruntime = thisproc()->schinfo.vruntime;
     // }
-    // printk("sched runnable %d\n", this->pid);
+
     ASSERT(_rb_insert(&this->schinfo.rq, &this->container->schqueue.rq,
                       __sched_cmp) == 0);
     this->container->schqueue.node_cnt++;
+    // if (this->container->id == 0) {
+    // printk("runnable: proc %d to container %d,node cnt:%d\n", this->pid,
+    //        this->container->id, this->container->schqueue.node_cnt);
+    // }
   }
   this->state = new_state;
 }
@@ -193,27 +206,54 @@ rb_node _rb_first_ex(rb_root root) {
 rb_node _rb_first_ex_p(rb_node n) {
   // rb_node n;
   // n = root->rb_node;
+  rb_node left = NULL;
   if (!n)
     return NULL;
-  // if (expression) {
-  // statements
-  // }
-  // printk("in tree:left:%p,skip?:%d", n->rb_left,
-  //        container_of(n->rb_left, struct schinfo, rq)->skip);
-  while (n->rb_left && !container_of(n->rb_left, struct schinfo, rq)->skip) {
+  if (n->rb_left != NULL /*&&
+      !(container_of(n->rb_left, struct schinfo, rq)->group &&
+        container_of(n->rb_left, struct schinfo, rq)->skip)*/) {
+    // printk("go left,");
+    left = _rb_first_ex_p(n->rb_left);
+  }
+  if (left != NULL) {
+    // printk("1");
+    return left;
+  }
+  if (container_of(n, struct schinfo, rq)->group) {
+    // printk("container:%dskip?:%d\n",
+    //        container_of(n, struct container, schinfo.rq)->id,
+    //        container_of(n, struct schinfo, rq)->skip);
+  }
+  if (!(container_of(n, struct schinfo, rq)->group &&
+        container_of(n, struct schinfo, rq)->skip)) {
+    // printk("2");
+    return n;
+  }
+  if (n->rb_right != NULL) {
+    // printk("3");
+    return _rb_first_ex_p(n->rb_right);
+  }
+  return NULL;
 
-    n = n->rb_left;
-    // printk("in tree while:left:%p,skip?:%d", n->rb_left,
-    //        container_of(n->rb_left, struct schinfo, rq)->skip);
-  }
-  printk("tree return:%p\n", n);
-  if (container_of(n, struct schinfo, rq)->skip) {
-    printk("middle skip\n");
-    printk("right:%p", n->rb_right);
-    n = n->rb_right;
-    return _rb_first_ex_p(n);
-  }
-  return n;
+  // // if (expression) {
+  // // statements
+  // // }
+  // // printk("in tree:left:%p,skip?:%d", n->rb_left,
+  // //        container_of(n->rb_left, struct schinfo, rq)->skip);
+  // while (n->rb_left && !container_of(n->rb_left, struct schinfo, rq)->skip) {
+
+  //   n = n->rb_left;
+  //   // printk("in tree while:left:%p,skip?:%d", n->rb_left,
+  //   //        container_of(n->rb_left, struct schinfo, rq)->skip);
+  // }
+  // // printk("tree return:%p\n", n);
+  // if (container_of(n, struct schinfo, rq)->skip) {
+  //   // printk("middle skip\n");
+  //   // printk("right:%p", n->rb_right);
+  //   n = n->rb_right;
+  //   return _rb_first_ex_p(n);
+  // }
+  // return n;
 }
 
 void _rb_walk(rb_node rt_node) {
@@ -224,30 +264,48 @@ void _rb_walk(rb_node rt_node) {
   }
 }
 
-static struct proc *pick_next_r(rb_root rt, bool print) {
+static struct proc *pick_next_r(rb_root rt) {
   if (panic_flag) {
     return cpus[cpuid()].sched.idle;
   }
+  // printk("cpu %d sched: container %d schqueue\n", cpuid(),
+  //        container_of(rt, struct container, schqueue.rq)->id);
 
   rb_node get_node = NULL;
-  get_node = _rb_first_ex(rt);
-  if (print) {
-    get_node = _rb_first_ex_p(rt->rb_node);
+  get_node = _rb_first_ex_p(rt->rb_node);
+
+  if (container_of(rt, struct container, schqueue.rq) != &root_container &&
+      container_of(rt, struct container, schqueue.rq)->schqueue.node_cnt != 0 &&
+      get_node == NULL) {
+    // printk("container %d and its children rq empty\n",
+    //        container_of(rt, struct container, schqueue.rq)->id);
+    container_of(rt, struct container, schqueue.rq)->schinfo.skip = true;
+    return pick_next_r(
+        &container_of(rt, struct container, schqueue.rq)->parent->schqueue.rq);
   }
+
   if (get_node == NULL) {
+    // printk("cpu %d return idle\n", cpuid());
     return cpus[cpuid()].sched.idle;
   }
+
   struct schinfo *schinfo = container_of(get_node, struct schinfo, rq);
+
   if (!schinfo->group) {
-    printk("1");
     struct proc *res_proc = container_of(schinfo, struct proc, schinfo);
     _rb_erase(&res_proc->schinfo.rq, &res_proc->container->schqueue.rq);
     res_proc->container->schqueue.node_cnt--;
     ASSERT(res_proc->container->schqueue.node_cnt >= 0);
+    // if (container_of(rt, struct container, schqueue.rq)->id == 0) {
+    // printk("cpu %d container %d pick process %d,node cnt:%d\n", cpuid(),
+    //        container_of(rt, struct container, schqueue.rq)->id,
+    //        res_proc->pid, res_proc->container->schqueue.node_cnt);
+    // }
+
     return res_proc;
   } else {
 
-    // printk(
+    // printk(4994
     //     "container rq node:%p,left:%p,right:%p,first_res %p",
     //     &container_of(schinfo, struct container,
     //     schinfo)->schqueue.rq.rb_node, &container_of(schinfo, struct
@@ -257,22 +315,24 @@ static struct proc *pick_next_r(rb_root rt, bool print) {
     //          ->schqueue.rq.rb_node->rb_right,
     //     _rb_first_ex(
     //         &container_of(schinfo, struct container, schinfo)->schqueue.rq));
-
+    // printk("container %d sched container %d\n",
+    //        container_of(rt, struct container, schqueue.rq)->id,
+    //        container_of(schinfo, struct container, schinfo)->id);
     if (container_of(schinfo, struct container, schinfo)->schqueue.node_cnt ==
         0) {
-      printk("former skip:%d", schinfo->skip);
-      printk("former ptr:%p", get_node);
+      // printk("former skip:%d", schinfo->skip);
+      // printk("former ptr:%p", get_node);
       schinfo->skip = true;
-      printk("  2  ");
-      printk("container %d rq empty\n",
-             container_of(schinfo, struct container, schinfo)->id);
+      // printk("  2  ");
+      // printk("container %d rq empty\n",
+      //        container_of(schinfo, struct container, schinfo)->id);
 
-      return pick_next_r(rt, true);
+      return pick_next_r(rt);
     }
-    printk("3");
+    // printk("3");
 
     return pick_next_r(
-        &container_of(schinfo, struct container, schinfo)->schqueue.rq, false);
+        &container_of(schinfo, struct container, schinfo)->schqueue.rq);
   }
 }
 
@@ -285,9 +345,9 @@ static struct proc *pick_next_r(rb_root rt, bool print) {
 //   }
 // }
 static struct proc *pick_next() {
-  printk("begin\n");
-  auto ret = pick_next_r(&root_container.schqueue.rq, false);
-  printk("end\n");
+  // printk("begin\n");
+  auto ret = pick_next_r(&root_container.schqueue.rq);
+  // printk("end\n");
   _rb_walk(root_container.schqueue.rq.rb_node);
 
   return ret;
@@ -354,11 +414,18 @@ void activate_group(struct container *group) {
   // TODO: add the schinfo node of the group to the schqueue of its parent
   _acquire_sched_lock();
 
-  printk("add container %p to parent container%p,node vruntime:%lld\n",
-         &group->schinfo.rq, &group->parent->schqueue.rq,
-         group->schinfo.vruntime);
   ASSERT(_rb_insert(&group->schinfo.rq, &group->parent->schqueue.rq,
                     __sched_cmp) == 0);
+  group->parent->schqueue.node_cnt++;
+
+  // if (group->parent->id == 0) {
+  // printk("add container %d to parent container%d,node vruntime:%lld,node cnt
+  // "
+  //        "%d\n",
+  //        group->id, group->parent->id, group->schinfo.vruntime,
+  //        group->parent->schqueue.node_cnt);
+  // }
+
   _release_sched_lock();
 }
 
@@ -377,6 +444,10 @@ static void update_this_proc(struct proc *p) {
 // A simple scheduler.
 // You are allowed to replace it with whatever you like.
 static void simple_sched(enum procstate new_state) {
+  // if (new_state == RUNNABLE && thisproc()->killed) {
+  // printk("proc %d in sched,killed?:%d\n", thisproc()->pid,
+  // thisproc()->killed);
+  // }
   // printk("root container%p\n", &root_container);
   if (thisproc()->pid != 0) {
     // printk("sched %d,cpu%d,container %p\n", thisproc()->pid, cpuid(),
@@ -398,7 +469,7 @@ static void simple_sched(enum procstate new_state) {
   update_this_proc(next);
   // printk("cpu%d next proc%p,pid:%d,state:%d,idle?:%d\n", cpuid(), next,
   //        next->pid, next->state, next->idle);
-  printk("state:%d ", next->state);
+  // printk("state:%d ", next->state);
   ASSERT(next->state == RUNNABLE);
   next->state = RUNNING;
 
