@@ -33,8 +33,8 @@ NO_RETURN void kernel_entry() {
   // vm_test();
   // user_proc_test();
 
-  // proc_test();
-  // user_proc_test();
+  proc_test();
+  user_proc_test();
   container_test();
   // sd_test();
 
