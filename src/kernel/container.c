@@ -82,6 +82,6 @@ struct container *create_container(void (*root_entry)(), u64 arg) {
 
 define_early_init(root_container) {
   init_container(&root_container);
-  root_container.id = -1;
+  root_container.id = 4;
   root_container.rootproc = &root_proc;
 }

@@ -12,7 +12,14 @@
 #include <kernel/proc.h>
 #include <kernel/sched.h>
 
-#define TIMER_ELAPSE 50
+#define TIMER_ELAPSE 1
+#define WEIGHT_SUM 1
+#define SLICE 5
+
+static int con_to_weight[5] = {6, 4, 24, 24, 1};
+static int con_to_limit[5] = {4, 6, 1, 1, 24};
+
+// static int permit_time[5]={}
 
 extern bool panic_flag;
 
@@ -41,18 +48,15 @@ void _release_sched_lock() { _release_spinlock(&rqlock); }
 static void sched_timer_handler(struct timer *t) {
   if (t->triggered) {
     set_cpu_timer(&sched_timer[cpuid()]);
-    if (thisproc()->schinfo.vruntime >= thisproc()->schinfo.permit_time) {
-      if (!thisproc()->idle) {
-        _acquire_sched_lock();
-        auto container = thisproc()->container;
-        if (container != &root_container) {
-          _rb_erase(&container->schinfo.rq, &container->parent->schqueue.rq);
-          ASSERT(_rb_insert(&container->schinfo.rq,
-                            &container->parent->schqueue.rq, __sched_cmp) == 0);
-        }
-        _release_sched_lock();
-      }
-
+    if (!thisproc()->idle) {
+      // printk("proc: %d vruntime: %lld\n", thisproc()->pid,
+      //        (get_timestamp_ms() - thisproc()->schinfo.start_time) *
+      //            con_to_weight[thisproc()->container->id] / WEIGHT_SUM);
+    }
+    if (thisproc()->idle ||
+        (get_timestamp_ms() - thisproc()->schinfo.start_time) *
+                con_to_weight[thisproc()->container->id] / WEIGHT_SUM >=
+            (u64)SLICE / con_to_limit[thisproc()->container->id]) {
       yield();
     }
   }
@@ -115,7 +119,6 @@ bool _activate_proc(struct proc *p, bool onalert) {
   if (p->state == SLEEPING || p->state == UNUSED ||
       (p->state == DEEPSLEEPING && !onalert)) {
     p->state = RUNNABLE;
-    // p->schinfo.prio = 100;
     ASSERT(_rb_insert(&p->schinfo.rq, &p->container->schqueue.rq,
                       __sched_cmp) == 0);
     p->container->schqueue.node_cnt++;
@@ -129,11 +132,35 @@ static void update_this_state(enum procstate new_state) {
   // sched queue if new_state=SLEEPING/ZOMBIE
   auto this = thisproc();
   if (!this->idle && this->state == RUNNING && new_state == RUNNABLE) {
-    thisproc()->schinfo.vruntime +=
-        get_timestamp_ms() - thisproc()->schinfo.start_time;
+
+    auto delta_time = (get_timestamp_ms() - thisproc()->schinfo.start_time) *
+                      con_to_weight[thisproc()->container->id] / WEIGHT_SUM;
+    thisproc()->schinfo.vruntime += delta_time;
+
     ASSERT(_rb_insert(&this->schinfo.rq, &this->container->schqueue.rq,
                       __sched_cmp) == 0);
     this->container->schqueue.node_cnt++;
+
+    auto container = thisproc()->container;
+    container->schinfo.vruntime =
+        container_of(container->schqueue.rq.rb_node, struct schinfo, rq)
+            ->vruntime;
+    if (container != &root_container) {
+      _rb_erase(&container->schinfo.rq, &container->parent->schqueue.rq);
+      ASSERT(_rb_insert(&container->schinfo.rq, &container->parent->schqueue.rq,
+                        __sched_cmp) == 0);
+
+      auto parent = container->parent;
+      if (parent != &root_container) {
+        parent->schinfo.vruntime =
+            container_of(parent->schqueue.rq.rb_node, struct schinfo, rq)
+                ->vruntime;
+
+        _rb_erase(&parent->schinfo.rq, &parent->parent->schqueue.rq);
+        ASSERT(_rb_insert(&parent->schinfo.rq, &parent->parent->schqueue.rq,
+                          __sched_cmp) == 0);
+      }
+    }
   }
   this->state = new_state;
 }
@@ -248,7 +275,6 @@ static void simple_sched(enum procstate new_state) {
   update_this_state(new_state);
   auto next = pick_next();
   if (!next->idle) {
-    next->container->schinfo.vruntime = next->schinfo.vruntime;
   }
   update_this_proc(next);
   ASSERT(next->state == RUNNABLE);
