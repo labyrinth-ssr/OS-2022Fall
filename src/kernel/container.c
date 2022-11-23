@@ -36,44 +36,16 @@ void init_container(struct container *container) {
 }
 
 struct container *create_container(void (*root_entry)(), u64 arg) {
-  // struct container *parent;
-  // struct proc *rootproc;
-
-  // struct schinfo schinfo;
-  // struct schqueue schqueue;
-
-  // // TODO: namespace (local pid?)
-  // SpinLock pid_lock;
-  // struct pid_pool pids;
-
-  // auto res = sizeof(struct schinfo) + sizeof(struct schqueue)
-  // +sizeof(SpinLock) + sizeof(struct pid_pool) ;
   // TODO
   struct container *new_container = kalloc(sizeof(struct container));
   init_container(new_container);
   new_container->id = arg;
 
-  // printk("create container %d\n", arg);
-  // memset(new_container, 0, sizeof(struct container));
-
   new_container->parent = thisproc()->container;
-  printk("create container %lld,parent %d\n", arg, thisproc()->container->id);
   struct proc *rootproc = create_proc();
   rootproc->container = new_container;
   new_container->rootproc = rootproc;
-  printk("container %d rootproc %d\n", new_container->id, rootproc->pid);
-  // init_schinfo(&new_container->schinfo, true);
-  // init_schqueue(&new_container->schqueue);
-  // new_container->pids.avail = 1;
-  // for (int i = 0; i < PID_NUM; i++) {
-  //   new_container->pids.freelist[i] = i;
-  // }
-  // init_spinlock(&new_container->pid_lock);
-  // rootproc lock?
   set_parent_to_this(rootproc);
-  // rootproc->localpid = 0;
-  // _rb_insert(&rootproc->schinfo.rq, &new_container->schqueue.rq, bool
-  // (*cmp)(rb_node, rb_node))
   start_proc(rootproc, root_entry, arg);
   activate_group(new_container);
 

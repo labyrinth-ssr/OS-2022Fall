@@ -19,8 +19,6 @@
 static int con_to_weight[5] = {6, 4, 24, 24, 1};
 static int con_to_limit[5] = {4, 6, 1, 1, 24};
 
-// static int permit_time[5]={}
-
 extern bool panic_flag;
 
 extern void swtch(KernelContext *new_ctx, KernelContext **old_ctx);
@@ -48,11 +46,6 @@ void _release_sched_lock() { _release_spinlock(&rqlock); }
 static void sched_timer_handler(struct timer *t) {
   if (t->triggered) {
     set_cpu_timer(&sched_timer[cpuid()]);
-    if (!thisproc()->idle) {
-      // printk("proc: %d vruntime: %lld\n", thisproc()->pid,
-      //        (get_timestamp_ms() - thisproc()->schinfo.start_time) *
-      //            con_to_weight[thisproc()->container->id] / WEIGHT_SUM);
-    }
     if (thisproc()->idle ||
         (get_timestamp_ms() - thisproc()->schinfo.start_time) *
                 con_to_weight[thisproc()->container->id] / WEIGHT_SUM >=
@@ -142,24 +135,15 @@ static void update_this_state(enum procstate new_state) {
     this->container->schqueue.node_cnt++;
 
     auto container = thisproc()->container;
-    container->schinfo.vruntime =
-        container_of(container->schqueue.rq.rb_node, struct schinfo, rq)
-            ->vruntime;
-    if (container != &root_container) {
+
+    while (container->parent != NULL) {
+      container->schinfo.vruntime =
+          container_of(container->schqueue.rq.rb_node, struct schinfo, rq)
+              ->vruntime;
       _rb_erase(&container->schinfo.rq, &container->parent->schqueue.rq);
       ASSERT(_rb_insert(&container->schinfo.rq, &container->parent->schqueue.rq,
                         __sched_cmp) == 0);
-
-      auto parent = container->parent;
-      if (parent != &root_container) {
-        parent->schinfo.vruntime =
-            container_of(parent->schqueue.rq.rb_node, struct schinfo, rq)
-                ->vruntime;
-
-        _rb_erase(&parent->schinfo.rq, &parent->parent->schqueue.rq);
-        ASSERT(_rb_insert(&parent->schinfo.rq, &parent->parent->schqueue.rq,
-                          __sched_cmp) == 0);
-      }
+      container = container->parent;
     }
   }
   this->state = new_state;

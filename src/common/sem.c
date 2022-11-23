@@ -48,9 +48,6 @@ void _unlock_sem(Semaphore *sem) { _release_spinlock(&sem->lock); }
 bool _wait_sem(Semaphore *sem, bool alertable) {
   setup_checker(0);
   checker_begin_ctx(0);
-  if (thisproc()->pid == 1) {
-    printk("sem val:%d", sem->val);
-  }
   if (--sem->val >= 0) {
     release_spinlock(0, &sem->lock);
     return true;

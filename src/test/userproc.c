@@ -84,8 +84,6 @@ static void _create_user_proc(int i) {
 static int _wait_user_proc() {
   int code, id = -1, pid, lpid;
   lpid = wait(&code, &pid);
-  printk("cpu %d pid:%d\n", cpuid(), pid);
-
   ASSERT(lpid != -1);
   for (int j = 0; j < 22; j++) {
     if (pids[j] == pid) {
@@ -95,7 +93,7 @@ static int _wait_user_proc() {
   }
   ASSERT(id != -1);
   ASSERT(code == -1);
-  printk("cpu %d proc %d killed\n", cpuid(), id);
+  printk("proc %d killed\n", id);
   return id;
 }
 
@@ -153,14 +151,11 @@ void container_test() {
   ASSERT(wait_sem(&myrepot_done));
   printk("done\n");
   for (int i = 0; i < 22; i++) {
-    // printk("kill %d\n", i);
     ASSERT(kill(pids[i]) == 0);
   }
-  printk("kill done\n");
   for (int i = 16; i < 22; i++) {
     ASSERT(_wait_user_proc() >= 16);
   }
-  printk("wait done\n");
   for (int i = 0; i < 4; i++)
     ASSERT(wait_sem(&container_done));
   printk("wait sem done\n");
