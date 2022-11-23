@@ -128,7 +128,6 @@ static void container_root(int a) {
     _create_user_proc(i);
   for (int i = 0; i < 4; i++)
     ASSERT(_wait_user_proc() / 4 == a);
-  printk("cpu %d before post container\n", cpuid());
   post_sem(&container_done);
   setup_checker(0);
   lock_for_sched(0);
@@ -158,7 +157,6 @@ void container_test() {
   }
   for (int i = 0; i < 4; i++)
     ASSERT(wait_sem(&container_done));
-  printk("wait sem done\n");
   printk("container_test PASS\nRuntime:\n");
   for (int i = 0; i < 4; i++)
     printk("CPU %d: %llu\n", i, cpu_cnt[i]);
