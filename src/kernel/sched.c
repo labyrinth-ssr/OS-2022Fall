@@ -16,8 +16,8 @@
 #define WEIGHT_SUM 1
 #define SLICE 5
 
-static int con_to_weight[5] = {6, 4, 24, 24, 1};
-static int con_to_limit[5] = {4, 6, 1, 1, 24};
+static int con_to_weight[5] = {1, 1, 1, 1, 1};
+static int con_to_limit[5] = {1, 1, 1, 1, 1};
 
 extern bool panic_flag;
 
@@ -137,9 +137,9 @@ static void update_this_state(enum procstate new_state) {
     auto container = thisproc()->container;
 
     while (container->parent != NULL) {
-      container->schinfo.vruntime =
-          container_of(container->schqueue.rq.rb_node, struct schinfo, rq)
-              ->vruntime;
+      container->schinfo.vruntime += delta_time;
+      // container_of(container->schqueue.rq.rb_node, struct schinfo, rq)
+      //     ->vruntime;
       _rb_erase(&container->schinfo.rq, &container->parent->schqueue.rq);
       ASSERT(_rb_insert(&container->schinfo.rq, &container->parent->schqueue.rq,
                         __sched_cmp) == 0);
