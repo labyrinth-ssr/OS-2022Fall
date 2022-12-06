@@ -2,6 +2,7 @@
 #include "common/defines.h"
 #include "common/sem.h"
 #include "common/spinlock.h"
+#include "kernel/pt.h"
 #include <common/list.h>
 #include <common/string.h>
 #include <kernel/init.h>
@@ -151,29 +152,24 @@ int wait(int *exitcode, int *pid) {
   PANIC();
 }
 
-struct proc *dfs(struct proc *proc, int pid) {
-  if (proc->pid == pid && proc->state != UNUSED) {
+struct proc *dfs(struct proc *proc, int pid, bool offline) {
+  if ((proc->pid == pid || (offline && !proc->pgdir.online)) &&
+      proc->state != UNUSED) {
     return proc;
-  } else if (proc->state == UNUSED) {
-    // printk("%d unused\n", proc->pid);
   }
   if (_empty_list(&proc->children)) {
-    // printk("child empty\n");
     return NULL;
   }
-
   _for_in_list(cp, &proc->children) {
     if (cp == &proc->children) {
       continue;
     }
     auto c_proc = container_of(cp, struct proc, ptnode);
-    auto child_res = dfs(c_proc, pid);
+    auto child_res = dfs(c_proc, pid, offline);
     if (child_res != NULL) {
       return child_res;
     }
   }
-  // printk("can't find child\n");
-
   return NULL;
 }
 
@@ -183,7 +179,7 @@ int kill(int pid) {
   // Return -1 if the pid is invalid (proc not found).
   // printk("to kill %d\n", pid);
   _acquire_spinlock(&plock);
-  auto kill_proc = dfs(&root_proc, pid);
+  auto kill_proc = dfs(&root_proc, pid, false);
   if (kill_proc != NULL) {
     kill_proc->killed = true;
     _release_spinlock(&plock);
@@ -256,6 +252,15 @@ define_init(root_proc) {
   init_proc(&root_proc);
   root_proc.parent = &root_proc;
   start_proc(&root_proc, kernel_entry, 123456);
+}
+
+struct proc *get_offline_proc() {
+  auto offline_proc = dfs(&root_proc, 0, true);
+  if (offline_proc == NULL) {
+    printk("no offline in proc tree\n");
+    PANIC();
+  }
+  return offline_proc;
 }
 
 // void yield() {

@@ -1,3 +1,4 @@
+#include "kernel/paging.h"
 #include <aarch64/intrinsic.h>
 #include <aarch64/trap.h>
 #include <driver/interrupt.h>
@@ -31,6 +32,7 @@ void trap_global_handler(UserContext *context) {
   case ESR_EC_DABORT_EL0:
   case ESR_EC_DABORT_EL1: {
     printk("Page fault %llu\n", ec);
+    pgfault(ec);
     PANIC();
   } break;
   default: {

@@ -1,6 +1,11 @@
+#include "aarch64/mmu.h"
+#include "common/defines.h"
+#include "fs/cache.h"
+#include "fs/defines.h"
 #include <common/list.h>
 #include <common/rc.h>
 #include <common/spinlock.h>
+#include <common/string.h>
 #include <driver/memlayout.h>
 #include <kernel/init.h>
 #include <kernel/mem.h>
@@ -12,6 +17,9 @@
 
 static SpinLock mem_lock;
 static SpinLock mem_lock2;
+static SpinLock refcnt_lock;
+static bool zero_init = true;
+static void *zero_page;
 
 RefCount alloc_page_cnt;
 
@@ -47,7 +55,10 @@ void *kalloc_page() {
 // Free: add the page to the queue of usable pages.
 void kfree_page(void *p) {
   _decrement_rc(&alloc_page_cnt);
-  add_to_queue(&pages, (QueueNode *)p);
+  // no need clock?
+  if (alloc_page_cnt.count == 0) {
+    add_to_queue(&pages, (QueueNode *)p);
+  }
 }
 
 typedef struct SlabNode {
@@ -281,3 +292,51 @@ void kfree(void *p) {
 
   release_spinlock(one, &mem_lock);
 }
+
+u64 left_page_cnt() {
+  _acquire_spinlock(&refcnt_lock);
+  auto ret = alloc_page_cnt.count;
+  _release_spinlock(&refcnt_lock);
+  return ret;
+}
+
+u32 write_page_to_disk(void *ka) {
+  auto first_bno = find_and_set_8_blocks();
+  OpContext ctx;
+  bcache.begin_op(&ctx);
+  for (u32 i = 0; i < 8; i++) {
+    auto block = bcache.acquire(first_bno + i);
+    memcpy(block->data, ka + i * BLOCK_SIZE, BLOCK_SIZE);
+    bcache.sync(&ctx, block);
+    bcache.release(block);
+  }
+  bcache.end_op(&ctx);
+
+  return first_bno;
+}
+
+void read_page_from_disk(void *ka, u32 bno) {
+  if (!((u64)ka & KSPACE_MASK)) {
+    printk("not kernel addr\n");
+    PANIC();
+  }
+  OpContext ctx;
+  bcache.begin_op(&ctx);
+  for (u32 i = 0; i < 8; i++) {
+    auto block = bcache.acquire(bno + i);
+    memcpy(ka + i * BLOCK_SIZE, block->data, BLOCK_SIZE);
+    bcache.release(block);
+  }
+  bcache.end_op(&ctx);
+}
+
+void *get_zero_page() {
+  if (zero_init) {
+    zero_page = kalloc_page();
+    return zero_page;
+  } else {
+    return zero_page;
+  }
+}
+
+bool check_zero_page() { return !memcmp(zero_page, 0, PAGE_SIZE); }

@@ -269,7 +269,7 @@ static void cache_end_op(OpContext *ctx) {
   // log.header.block_no =
 }
 
-usize BBLOCK(usize b, SuperBlock *sb) {
+usize BBLOCK(usize b, const SuperBlock *sb) {
   auto ret = b / BIT_PER_BLOCK + sb->bitmap_start;
   return ret;
 }
@@ -317,6 +317,57 @@ static void cache_free(OpContext *ctx, usize block_no) {
   bp->data[bi / 8] &= ~m;
   cache_sync(ctx, bp);
   cache_release(bp);
+}
+
+void release_8_blocks(u32 bno) {
+  OpContext ctx;
+  for (usize i = 0; i < 8; i++) {
+    bcache.begin_op(&ctx);
+    bcache.free(&ctx, bno + i);
+    bcache.end_op(&ctx);
+  }
+}
+
+u32 find_and_set_8_blocks() {
+  // TODO:在swap分区中找到8个连续的块，并返回第一个块的
+  // 块号
+  OpContext ctx;
+
+  u32 b, bi, m;
+  Block *bp = NULL;
+  for (b = SWAP_START; b < SWAP_END; b += BIT_PER_BLOCK) {
+    bp = cache_acquire(BBLOCK((u32)b, sblock));
+
+    u32 left = 0, right = 0;
+    bool has_eight = FALSE;
+
+    while (right < BIT_PER_BLOCK && b + right < sblock->num_blocks) {
+      m = (u32)(1 << (right % 8));
+      if ((bp->data[right / 8] & (u8)m) == 0) {
+        right++;
+        if (right - left == 8) {
+          has_eight = TRUE;
+          break;
+        }
+      } else {
+        left = right + 1;
+        right = left;
+      }
+    }
+    if (has_eight) {
+      for (bi = left; bi < right; bi++) {
+        m = (u32)(1 << (bi % 8));
+        bp->data[bi / 8] |= (u8)m;
+        cache_sync(&ctx, bp);
+        bzero(&ctx, b + bi);
+      }
+      cache_release(bp);
+      return left;
+    }
+    cache_release(bp);
+  }
+  printk("no continuous 8 blocks on disk");
+  PANIC();
 }
 
 BlockCache bcache = {

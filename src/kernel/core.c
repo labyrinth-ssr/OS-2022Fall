@@ -33,12 +33,14 @@ NO_RETURN void kernel_entry() {
   // vm_test();
   // user_proc_test();
 
-  proc_test();
-  user_proc_test();
-  container_test();
+  // proc_test();
+  // user_proc_test();
+  // container_test();
   // sd_test();
-
   do_rest_init();
+
+  pgfault_first_test();
+  pgfault_second_test();
 
   while (1)
     yield();
