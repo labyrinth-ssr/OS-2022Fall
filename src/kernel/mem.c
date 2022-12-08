@@ -27,7 +27,7 @@ static SpinLock mem_lock;
 static SpinLock mem_lock2;
 static SpinLock refcnt_lock;
 // static bool zero_init = true;
-static void *zero_page;
+u8 zero_page[PAGE_SIZE];
 // struct page page_arr[TOTAL_PAGE];
 RefCount zero_page_cnt;
 
@@ -59,6 +59,8 @@ int total_page() {
 // See API Reference for more information on given data structures.
 static QueueNode *pages;
 define_early_init(pages) {
+  memset(&zero_page, 0, PAGE_SIZE);
+  printk("zero data:%lld", *(i64 *)zero_page);
   for (u64 p = PAGE_BASE((u64)&end) + PAGE_SIZE; p < P2K(PHYSTOP);
        p += PAGE_SIZE) {
     // init_rc(&page_arr[page2index((void *)p)].ref);
@@ -67,12 +69,12 @@ define_early_init(pages) {
   printk("page list finish\n");
 }
 
-define_init(zero_page) {
-  zero_page = kalloc_page();
-  memset(zero_page, 0, PAGE_SIZE);
-  _increment_rc(&zero_page_cnt);
-  _increment_rc(&alloc_page_cnt);
-}
+// define_init(zero_page) {
+//   zero_page = kalloc_page();
+//   memset(zero_page, 0, PAGE_SIZE);
+//   _increment_rc(&zero_page_cnt);
+//   _increment_rc(&alloc_page_cnt);
+// }
 
 // Allocate: fetch a page from the queue of usable pages.
 void *kalloc_page() {
@@ -84,13 +86,11 @@ void *kalloc_page() {
 
 // Free: add the page to the queue of usable pages.
 void kfree_page(void *p) {
-  if (p == zero_page) {
+  if (p == &zero_page) {
     _decrement_rc(&zero_page_cnt);
-    if (zero_page_cnt.count == 0) {
-      _decrement_rc(&alloc_page_cnt);
-      zero_page = NULL;
-      add_to_queue(&pages, p);
-    }
+    // if (zero_page_cnt.count == 0) {
+    //   _decrement_rc(&alloc_page_cnt);
+    // }
   } else {
     _decrement_rc(&alloc_page_cnt);
     add_to_queue(&pages, p);
@@ -323,12 +323,13 @@ void read_page_from_disk(void *ka, u32 bno) {
 }
 
 void *get_zero_page() {
-  if (zero_page == NULL) {
-    zero_page = kalloc_page();
-  }
+  // if (zero_page == NULL) {
+  //   zero_page = kalloc_page();
+  // }
   _increment_rc(&zero_page_cnt);
-  return zero_page;
+  // _increment_rc(&alloc_page_cnt);
+  return &zero_page;
 }
 
-bool check_zero_page() { return !memcmp(zero_page, 0, PAGE_SIZE); }
+bool check_zero_page() { return !memcmp(&zero_page, 0, PAGE_SIZE); }
 //可以让全

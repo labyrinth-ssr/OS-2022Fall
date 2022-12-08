@@ -325,12 +325,14 @@ static void cache_free(OpContext *ctx, usize block_no) {
 }
 
 void release_8_blocks(u32 bno) {
-  OpContext ctx;
-  for (usize i = 0; i < 8; i++) {
-    bcache.begin_op(&ctx);
-    bcache.free(&ctx, bno + i);
-    bcache.end_op(&ctx);
+  // printk("release\n");
+  for (usize i = bno - SWAP_START;
+       i < bno - SWAP_START + 8 && i < SWAP_END - SWAP_START; i++) {
+    swap_valid[i] = false;
   }
+  // for (auto i = 0; i < SWAP_END - SWAP_START; i++) {
+  //   printk("%d ", swap_valid[i]);
+  // }
 }
 
 u32 find_and_set_8_blocks() {
@@ -341,29 +343,28 @@ u32 find_and_set_8_blocks() {
 
   // u32 b, bi, m;
   // Block *bp = NULL;
-  for (u32 bno = SWAP_START; bno < SWAP_END; bno += 1) {
-
-    u32 left = 0, right = 0;
-    bool has_eight = FALSE;
-    while (right < SWAP_END - SWAP_START) {
-      if (swap_valid[right] == false) {
-        right++;
-        if (right - left == 8) {
-          has_eight = TRUE;
-          break;
-        }
-      } else {
-        left = right + 1;
-        right = right + 1;
+  // for (u32 bno = SWAP_START; bno < SWAP_END; bno += 1) {
+  u32 left = 0, right = 0;
+  bool has_eight = FALSE;
+  while (right < SWAP_END - SWAP_START) {
+    if (swap_valid[right] == false) {
+      right++;
+      if (right - left == 8) {
+        has_eight = TRUE;
+        break;
       }
-    }
-    if (has_eight) {
-      for (u32 i = left; i < right; i++) {
-        swap_valid[i] = true;
-      }
-      return left;
+    } else {
+      left = right + 1;
+      right = right + 1;
     }
   }
+  if (has_eight) {
+    for (u32 i = left; i < right; i++) {
+      swap_valid[i] = true;
+    }
+    return SWAP_START + left;
+  }
+  // }
 
   // for (b = SWAP_START; b < SWAP_END; b += BIT_PER_BLOCK) {
   //   bp = cache_acquire(BBLOCK((u32)b, sblock));
@@ -398,6 +399,9 @@ u32 find_and_set_8_blocks() {
   // }
 
   printk("no continuous 8 blocks on disk");
+  for (auto i = 0; i < SWAP_END - SWAP_START; i++) {
+    printk("%d ", swap_valid[i]);
+  }
   PANIC();
   (void)swap_valid;
   // return 0;

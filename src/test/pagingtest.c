@@ -88,7 +88,7 @@ void pgfault_second_test() {
   // init
   i64 limit = 10; // do not need too big
   struct pgdir *pd = &thisproc()->pgdir;
-  init_pgdir(pd);
+  // init_pgdir(pd);
   attach_pgdir(pd);
   struct section *st = NULL;
   _for_in_list(node, &pd->section_head) {
@@ -106,6 +106,10 @@ void pgfault_second_test() {
   for (i64 i = 0; i < limit / 2; ++i) {
     u64 va = i * PAGE_SIZE;
     vmmap(pd, va, get_zero_page(), PTE_RO | PTE_USER_DATA);
+    // printk("zero page data %lld\n", *(i64 *)get_zero_page());
+    // printk("zero page addr %lld\n", K2P(get_zero_page()));
+    // printk("va data %lld\n", *(i64 *)va);
+    ASSERT(*(i64 *)va == 0);
   }
   arch_tlbi_vmalle1is();
   for (i64 i = 0; i < limit; ++i) {
@@ -141,6 +145,7 @@ void pgfault_second_test() {
     arch_tlbi_vmalle1is();
     *(i64 *)va = i;
     swapout(pd, st); // only need to swapout one page
+    printk("a\n");
     arch_tlbi_vmalle1is();
     ASSERT(*(i64 *)va == i); // swapin one page too
     swapout(pd, st);

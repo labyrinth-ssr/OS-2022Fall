@@ -45,7 +45,7 @@ NO_RETURN void kernel_entry() {
   // alloc_test();
   do_rest_init();
 
-  pgfault_first_test();
+  // pgfault_first_test();
   pgfault_second_test();
 
   while (1)
