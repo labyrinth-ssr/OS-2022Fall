@@ -12,6 +12,7 @@ extern "C" {
 #include <chrono>
 #include <condition_variable>
 #include <random>
+#include <test/test.h>
 #include <thread>
 
 namespace {

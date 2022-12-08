@@ -1,4 +1,9 @@
 #include "aarch64/mmu.h"
+#include "common/defines.h"
+#include "common/list.h"
+#include "common/spinlock.h"
+#include "kernel/paging.h"
+#include "kernel/sched.h"
 #include <aarch64/intrinsic.h>
 #include <common/string.h>
 #include <kernel/mem.h>
@@ -52,7 +57,13 @@ PTEntriesPtr get_pte(struct pgdir *pgdir, u64 va, bool alloc) {
   return &pt3[VA_PART3(va)];
 }
 
-void init_pgdir(struct pgdir *pgdir) { pgdir->pt = NULL; }
+void init_pgdir(struct pgdir *pgdir) {
+  memset(pgdir, 0, sizeof(struct pgdir));
+  init_spinlock(&pgdir->lock);
+  init_list_node(&pgdir->section_head);
+  init_sections(&pgdir->section_head);
+  pgdir->pt = NULL;
+}
 
 void free_pt_r(PTEntriesPtr pt, int num) {
   if (num == 3) {
@@ -74,11 +85,21 @@ void free_pgdir(struct pgdir *pgdir) {
   // TODO
   // Free pages used by the page table. If pgdir->pt=NULL, do nothing.
   // DONT FREE PAGES DESCRIBED BY THE PAGE TABLE
+  if (pgdir->pt == NULL) {
+    return;
+  }
   free_pt_r(pgdir->pt, 0);
 }
 
 void attach_pgdir(struct pgdir *pgdir) {
   extern PTEntries invalid_pt;
+  thisproc()->pgdir.online = false;
+  if (_try_acquire_spinlock(&thisproc()->pgdir.lock)) {
+    // printk("no online yet\n");
+  } else {
+    // printk("is online,proc %d\n", thisproc()->pid);
+  }
+  _release_spinlock(&thisproc()->pgdir.lock);
 
   if (pgdir->pt) {
     _acquire_spinlock(&pgdir->lock);

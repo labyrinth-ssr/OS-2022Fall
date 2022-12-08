@@ -1,3 +1,4 @@
+#include "common/defines.h"
 #include "kernel/paging.h"
 #include <aarch64/intrinsic.h>
 #include <aarch64/trap.h>
@@ -14,7 +15,7 @@ void trap_global_handler(UserContext *context) {
   u64 ec = esr >> ESR_EC_SHIFT;
   u64 iss = esr & ESR_ISS_MASK;
   u64 ir = esr & ESR_IR_MASK;
-  (void)iss;
+  // (void)iss;
   arch_reset_esr();
   switch (ec) {
   case ESR_EC_UNKNOWN: {
@@ -32,8 +33,10 @@ void trap_global_handler(UserContext *context) {
   case ESR_EC_DABORT_EL0:
   case ESR_EC_DABORT_EL1: {
     printk("Page fault %llu\n", ec);
-    pgfault(ec);
-    PANIC();
+    if (pgfault(iss) != 0) {
+      PANIC();
+    }
+    // whether to delete panic?
   } break;
   default: {
     printk("Unknwon exception %llu\n", ec);
@@ -43,10 +46,10 @@ void trap_global_handler(UserContext *context) {
 
   // TODO: stop killed process while returning to user space
   // extern char loop_start[], loop_end[];
-  if (!thisproc()->idle && thisproc()->killed) {
-    // printk("proc in trap:%d,killed?:%d,user?:%d\n", thisproc()->pid,
-    //        thisproc()->killed, (KSPACE_MASK & context->elr) == 0);
-  }
+  // if (!thisproc()->idle && thisproc()->killed) {
+  //   // printk("proc in trap:%d,killed?:%d,user?:%d\n", thisproc()->pid,
+  //   //        thisproc()->killed, (KSPACE_MASK & context->elr) == 0);
+  // }
 
   if (thisproc()->killed && (KSPACE_MASK & context->elr) == 0) {
     exit(-1);

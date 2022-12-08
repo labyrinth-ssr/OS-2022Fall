@@ -21,6 +21,7 @@ static SpinLock lock;    // protects block cache.
 static ListNode head;    // the list of all allocated in-memory block.
 static LogHeader header; // in-memory copy of log header block.
 static Semaphore s1, s2, s3;
+static bool swap_valid[SWAP_END - SWAP_START];
 
 // hint: you may need some other variables. Just add them here.
 struct LOG {
@@ -169,6 +170,10 @@ void init_bcache(const SuperBlock *_sblock, const BlockDevice *_device) {
   log.committing = false;
   log.outstanding = 0;
   recover_from_log();
+
+  for (auto i = SWAP_START; i < SWAP_END; i++) {
+    swap_valid[i] = false;
+  }
 }
 
 // see `cache.h`.
@@ -329,21 +334,19 @@ void release_8_blocks(u32 bno) {
 }
 
 u32 find_and_set_8_blocks() {
+
   // TODO:在swap分区中找到8个连续的块，并返回第一个块的
   // 块号
-  OpContext ctx;
+  // OpContext ctx;
 
-  u32 b, bi, m;
-  Block *bp = NULL;
-  for (b = SWAP_START; b < SWAP_END; b += BIT_PER_BLOCK) {
-    bp = cache_acquire(BBLOCK((u32)b, sblock));
+  // u32 b, bi, m;
+  // Block *bp = NULL;
+  for (u32 bno = SWAP_START; bno < SWAP_END; bno += 1) {
 
     u32 left = 0, right = 0;
     bool has_eight = FALSE;
-
-    while (right < BIT_PER_BLOCK && b + right < sblock->num_blocks) {
-      m = (u32)(1 << (right % 8));
-      if ((bp->data[right / 8] & (u8)m) == 0) {
+    while (right < SWAP_END - SWAP_START) {
+      if (swap_valid[right] == false) {
         right++;
         if (right - left == 8) {
           has_eight = TRUE;
@@ -351,23 +354,53 @@ u32 find_and_set_8_blocks() {
         }
       } else {
         left = right + 1;
-        right = left;
+        right = right + 1;
       }
     }
     if (has_eight) {
-      for (bi = left; bi < right; bi++) {
-        m = (u32)(1 << (bi % 8));
-        bp->data[bi / 8] |= (u8)m;
-        cache_sync(&ctx, bp);
-        bzero(&ctx, b + bi);
+      for (u32 i = left; i < right; i++) {
+        swap_valid[i] = true;
       }
-      cache_release(bp);
       return left;
     }
-    cache_release(bp);
   }
+
+  // for (b = SWAP_START; b < SWAP_END; b += BIT_PER_BLOCK) {
+  //   bp = cache_acquire(BBLOCK((u32)b, sblock));
+
+  //   u32 left = 0, right = 0;
+  //   bool has_eight = FALSE;
+
+  //   while (right < BIT_PER_BLOCK && b + right < sblock->num_blocks) {
+  //     m = (u32)(1 << (right % 8));
+  //     if ((bp->data[right / 8] & (u8)m) == 0) {
+  //       right++;
+  //       if (right - left == 8) {
+  //         has_eight = TRUE;
+  //         break;
+  //       }
+  //     } else {
+  //       left = right + 1;
+  //       right = left;
+  //     }
+  //   }
+  //   if (has_eight) {
+  //     for (bi = left; bi < right; bi++) {
+  //       m = (u32)(1 << (bi % 8));
+  //       bp->data[bi / 8] |= (u8)m;
+  //       cache_sync(&ctx, bp);
+  //       bzero(&ctx, b + bi);
+  //     }
+  //     cache_release(bp);
+  //     return left;
+  //   }
+  //   cache_release(bp);
+  // }
+
   printk("no continuous 8 blocks on disk");
   PANIC();
+  (void)swap_valid;
+  // return 0;
 }
 
 BlockCache bcache = {

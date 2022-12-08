@@ -105,20 +105,31 @@ void sd_init() {
   bufqueue_init(&bqueue);
   set_interrupt_handler(IRQ_ARASANSDIO, sd_intr);
   set_interrupt_handler(IRQ_SDIO, sd_intr);
+
   auto get_MBR = (buf *)kalloc(sizeof(buf));
   memset(get_MBR, 0, sizeof(*get_MBR));
-  bufqueue_lock(&bqueue);
-  bufqueue_push(&bqueue, get_MBR);
-  bufqueue_unlock(&bqueue);
-  auto save_flag = get_MBR->flags;
-  get_and_clear_EMMC_INTERRUPT();
-  _acquire_spinlock(&sdlock);
+
+  // bufqueue_lock(&bqueue);
+  // bufqueue_push(&bqueue, get_MBR);
+  // bufqueue_unlock(&bqueue);
+  // auto save_flag = get_MBR->flags;
+  // get_and_clear_EMMC_INTERRUPT();
+  // _acquire_spinlock(&sdlock);
+
   sd_start(get_MBR);
-  _release_spinlock(&sdlock);
-  init_sem(&rw_done, 0);
-  while (save_flag == get_MBR->flags) {
-    ASSERT(wait_sem(&rw_done));
-  }
+  sdWaitForInterrupt(INT_READ_RDY);
+
+  int done = 0;
+  u32 *ip = (u32 *)get_MBR->data;
+  while (done < 128)
+    ip[done++] = *EMMC_DATA;
+  sdWaitForInterrupt(INT_DATA_DONE);
+  arch_dsb_sy();
+  // _release_spinlock(&sdlock);
+  // init_sem(&rw_done, 0);
+  // while (save_flag == get_MBR->flags) {
+  //   ASSERT(wait_sem(&rw_done));
+  // }
   auto LBA = *(u32 *)((u64)get_MBR->data + 0x1CE + 0x8);
   auto sec_num = *(u32 *)((u64)get_MBR->data + 0x1CE + 0xC);
   printk("mbr data: LBA:%d, sec_num:%d\n", LBA, sec_num);
@@ -252,20 +263,25 @@ void sdrw(buf *b) {
   bufqueue_lock(&bqueue);
   _acquire_spinlock(&sdlock);
   bufqueue_push(&bqueue, b);
+  arch_dsb_sy();
   sd_start(b);
   _release_spinlock(&sdlock);
   if (bufqueue_empty(&bqueue)) {
     bufqueue_unlock(&bqueue);
     auto flag_save = b->flags;
     while (flag_save == b->flags) {
+      arch_dsb_sy();
       ASSERT(wait_sem(&rw_done));
+      arch_dsb_sy();
     }
   } else {
     auto b_first = bufqueue_front(&bqueue);
     bufqueue_unlock(&bqueue);
     auto flag_save = b_first->flags;
     while (flag_save == b_first->flags) {
+      arch_dsb_sy();
       ASSERT(wait_sem(&rw_done));
+      arch_dsb_sy();
     }
   }
 }

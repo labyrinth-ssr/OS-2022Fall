@@ -2,6 +2,9 @@
 #include "common/defines.h"
 #include "fs/cache.h"
 #include "fs/defines.h"
+#include "kernel/proc.h"
+#include "kernel/pt.h"
+#include "kernel/sched.h"
 #include <common/list.h>
 #include <common/rc.h>
 #include <common/spinlock.h>
@@ -11,22 +14,39 @@
 #include <kernel/mem.h>
 #include <kernel/printk.h>
 
+extern char end[];
+
 #define COLOUR_OFF 0
 #define CPU_NUM 4
 #define AC_LIMIT 10
+// #define TOTAL_PAGE 256776
+#define P2INDEX
+// #define
 
 static SpinLock mem_lock;
 static SpinLock mem_lock2;
 static SpinLock refcnt_lock;
-static bool zero_init = true;
+// static bool zero_init = true;
 static void *zero_page;
+// struct page page_arr[TOTAL_PAGE];
+RefCount zero_page_cnt;
 
 RefCount alloc_page_cnt;
 
 define_early_init(alloc_page_cnt) {
   init_rc(&alloc_page_cnt);
+  init_rc(&zero_page_cnt);
   init_spinlock(&mem_lock);
   init_spinlock(&mem_lock2);
+}
+
+int page2index(void *p) {
+  auto start = PAGE_BASE((u64)&end) + PAGE_SIZE;
+  return ((u64)p - start) / PAGE_SIZE;
+}
+
+int total_page() {
+  return (P2K(PHYSTOP) - (PAGE_BASE((u64)&end) + PAGE_SIZE)) / PAGE_SIZE;
 }
 
 // All usable pages are added to the queue.
@@ -38,38 +58,44 @@ define_early_init(alloc_page_cnt) {
 //
 // See API Reference for more information on given data structures.
 static QueueNode *pages;
-extern char end[];
 define_early_init(pages) {
   for (u64 p = PAGE_BASE((u64)&end) + PAGE_SIZE; p < P2K(PHYSTOP);
-       p += PAGE_SIZE)
+       p += PAGE_SIZE) {
+    // init_rc(&page_arr[page2index((void *)p)].ref);
     add_to_queue(&pages, (QueueNode *)p);
+  }
+  printk("page list finish\n");
+}
+
+define_init(zero_page) {
+  zero_page = kalloc_page();
+  memset(zero_page, 0, PAGE_SIZE);
+  _increment_rc(&zero_page_cnt);
+  _increment_rc(&alloc_page_cnt);
 }
 
 // Allocate: fetch a page from the queue of usable pages.
 void *kalloc_page() {
   _increment_rc(&alloc_page_cnt);
-  auto ret = fetch_from_queue(&pages);
-  return ret;
+  auto node = fetch_from_queue(&pages);
+  // _increment_rc(&page_arr[page2index(node)].ref);
+  return node;
 }
 
 // Free: add the page to the queue of usable pages.
 void kfree_page(void *p) {
-  _decrement_rc(&alloc_page_cnt);
-  // no need clock?
-  if (alloc_page_cnt.count == 0) {
-    add_to_queue(&pages, (QueueNode *)p);
+  if (p == zero_page) {
+    _decrement_rc(&zero_page_cnt);
+    if (zero_page_cnt.count == 0) {
+      _decrement_rc(&alloc_page_cnt);
+      zero_page = NULL;
+      add_to_queue(&pages, p);
+    }
+  } else {
+    _decrement_rc(&alloc_page_cnt);
+    add_to_queue(&pages, p);
   }
 }
-
-typedef struct SlabNode {
-  ListNode *prev;
-  ListNode *next;
-  int colour;
-  unsigned int active;
-  void *owner_cache;
-  void *take_up1;
-  int *freelist;
-} SlabNode;
 
 typedef struct Array_cache {
   unsigned int avail;
@@ -79,31 +105,34 @@ typedef struct Array_cache {
 // put the slab descripter in the head of slabs_partial,then set freelist and
 // avail.
 typedef struct CacheNode {
-  ListNode *prev;
-  ListNode *next;
   unsigned int pgorder; /* order of pages per slab (2^n) */
   unsigned int num;     /* objects per slab */
   isize object_size;
   unsigned int colour_off; /* colour offset */
   Array_cache_t array_cache[CPU_NUM];
-  SlabNode *slabs_partial;
-  SlabNode *slabs_full;
-  SlabNode *slabs_free;
+  ListNode slabs_partial_head;
+  ListNode slabs_full_head;
+  ListNode slabs_free_head;
+  ListNode cnode;
 } CacheNode;
 
+typedef struct SlabNode {
+  int colour;
+  unsigned int active;
+  CacheNode *owner_cache;
+  int *freelist;
+  ListNode snode;
+} SlabNode;
+
 // first means a cache node's first slab, save cache data (slab descripter data)
-void init_slab_node(SlabNode *slab_node, int obj_num, bool first,
-                    CacheNode *owner_cache) {
+void init_slab_node(SlabNode *slab_node, int obj_num) {
   slab_node->active = 0;
   slab_node->colour = 0;
-  slab_node->owner_cache =
-      first ? (void *)((u64)slab_node + PAGE_SIZE - sizeof(CacheNode))
-            : owner_cache;
   slab_node->freelist = (int *)((u64)slab_node + sizeof(SlabNode));
   for (int i = 0; i < obj_num; i++) {
     slab_node->freelist[i] = i;
   }
-  init_list_node((ListNode *)slab_node);
+  init_list_node(&slab_node->snode);
 }
 
 // must ensure the slab is not full
@@ -122,86 +151,24 @@ int get_obj_index(SlabNode *slab_node, isize size, int obj_num,
 }
 
 // head can be null
-void init_cache_node(isize size, CacheNode *cache_node, int num,
-                     SlabNode *slabs_partial) {
+void init_cache_node(isize size, CacheNode *cache_node, int num) {
   cache_node->pgorder = 0;
   cache_node->object_size = size;
   cache_node->colour_off = COLOUR_OFF;
   cache_node->num = num;
-  cache_node->slabs_partial = slabs_partial;
-  cache_node->slabs_full = NULL;
-  cache_node->slabs_free = NULL;
+  init_list_node(&cache_node->slabs_partial_head);
+  init_list_node(&cache_node->slabs_full_head);
+  init_list_node(&cache_node->slabs_free_head);
   for (int i = 0; i < CPU_NUM; i++) {
     cache_node->array_cache[i].avail = 0;
     for (int j = 0; j < AC_LIMIT; j++) {
       cache_node->array_cache[i].entry[j] = 0;
     }
   }
-  init_list_node((ListNode *)cache_node);
+  init_list_node(&cache_node->cnode);
 }
 
 static CacheNode *kmem_cache_array[2048];
-
-CacheNode *search_cache_size(CacheNode *head, isize size) {
-  auto listp = (ListNode *)head;
-  (void)listp;
-  _for_in_list(listp, (ListNode *)head) {
-    if (((CacheNode *)listp)->object_size == size) {
-      return (CacheNode *)listp;
-    }
-  }
-  return NULL;
-}
-
-void full_to_partial(CacheNode *kmem_cache, SlabNode *full_slab) {
-  kmem_cache->slabs_full =
-      (SlabNode *)_detach_from_list((ListNode *)(full_slab));
-  if (NULL == kmem_cache->slabs_partial) {
-    init_list_node((ListNode *)(full_slab));
-    kmem_cache->slabs_partial = full_slab;
-  } else {
-    _insert_into_list((ListNode *)kmem_cache->slabs_partial,
-                      (ListNode *)full_slab);
-  }
-}
-
-void partial_to_full(CacheNode *kmem_cache, SlabNode *partial_slab) {
-  kmem_cache->slabs_partial =
-      (SlabNode *)_detach_from_list((ListNode *)partial_slab);
-  if (NULL == kmem_cache->slabs_full) {
-    init_list_node((ListNode *)partial_slab);
-    kmem_cache->slabs_full = partial_slab;
-  } else {
-    _insert_into_list((ListNode *)kmem_cache->slabs_full,
-                      (ListNode *)partial_slab);
-  }
-}
-
-void partial_to_free(CacheNode *kmem_cache, SlabNode *partial_slab) {
-  // printk("partial to free\n");
-  kmem_cache->slabs_partial =
-      (SlabNode *)_detach_from_list((ListNode *)partial_slab);
-  if (NULL == kmem_cache->slabs_free) {
-    init_list_node((ListNode *)partial_slab);
-    kmem_cache->slabs_free = partial_slab;
-  } else {
-    _insert_into_list((ListNode *)kmem_cache->slabs_free,
-                      (ListNode *)partial_slab);
-  }
-}
-
-void free_to_partial(CacheNode *kmem_cache, SlabNode *free_slab) {
-  // printk("free to partial\n");
-  kmem_cache->slabs_free =
-      (SlabNode *)_detach_from_list((ListNode *)(free_slab));
-  if (NULL == kmem_cache->slabs_partial) {
-    init_list_node((ListNode *)(free_slab));
-    kmem_cache->slabs_partial = free_slab;
-  } else {
-    _insert_into_list((ListNode *)kmem_cache->slabs_partial,
-                      (ListNode *)free_slab);
-  }
-}
 
 // objects in the middle be freed
 void *kalloc(isize size) {
@@ -210,18 +177,21 @@ void *kalloc(isize size) {
   void *objp;
   CacheNode *search_res = kmem_cache_array[size];
   if (NULL == search_res) {
-    auto free_head = (SlabNode *)kalloc_page();
+    auto slab_node = (SlabNode *)(kalloc_page());
+    auto cache_node = (CacheNode *)(PAGE_BASE((u64)slab_node) + PAGE_SIZE -
+                                    sizeof(CacheNode));
+    kmem_cache_array[size] = cache_node;
     auto num = (PAGE_SIZE - 3 * COLOUR_OFF - sizeof(SlabNode) - 8 -
                 sizeof(CacheNode)) /
                (size + sizeof(int));
-    init_slab_node(free_head, num, true, NULL);
-    CacheNode *offset_node =
-        (CacheNode *)((u64)free_head + PAGE_SIZE - sizeof(CacheNode));
-    kmem_cache_array[size] = offset_node;
-    init_cache_node(size, offset_node, num, free_head);
-    auto ret = alloc_obj(free_head, size, num);
-    if (offset_node->slabs_partial->active >= offset_node->num) {
-      partial_to_full(offset_node, offset_node->slabs_partial);
+    init_cache_node(size, cache_node, num);
+    init_slab_node(slab_node, num);
+    slab_node->owner_cache = cache_node;
+    _insert_into_list(&cache_node->slabs_partial_head, &slab_node->snode);
+    auto ret = alloc_obj(slab_node, size, num);
+    if (slab_node->active >= cache_node->num) {
+      _detach_from_list(&slab_node->snode);
+      _merge_list(&slab_node->snode, &cache_node->slabs_full_head);
     }
     release_spinlock(one, &mem_lock);
     return ret;
@@ -235,28 +205,44 @@ void *kalloc(isize size) {
     return objp;
   }
   // avail is zero,refill the entry from global
-  if (NULL != kmem_cache->slabs_partial) {
-    auto ret = alloc_obj(kmem_cache->slabs_partial, size, kmem_cache->num);
-    if (kmem_cache->slabs_partial->active >= kmem_cache->num) {
-      partial_to_full(kmem_cache, kmem_cache->slabs_partial);
+  if (!_empty_list(&kmem_cache->slabs_partial_head)) {
+    auto slab_node = container_of(kmem_cache->slabs_partial_head.next,
+                                  struct SlabNode, snode);
+    auto ret = alloc_obj(slab_node, size, kmem_cache->num);
+    if (slab_node->active >= kmem_cache->num) {
+      _detach_from_list(&slab_node->snode);
+      _merge_list(&slab_node->snode, &kmem_cache->slabs_full_head);
     }
     release_spinlock(one, &mem_lock);
     return ret;
   }
 
-  if (NULL != kmem_cache->slabs_free) {
-    auto ret = alloc_obj(kmem_cache->slabs_free, size, kmem_cache->num);
-    free_to_partial(kmem_cache, kmem_cache->slabs_free);
+  if (!_empty_list(&kmem_cache->slabs_free_head)) {
+    auto slab_node =
+        container_of(kmem_cache->slabs_free_head.next, struct SlabNode, snode);
+    auto ret = alloc_obj(slab_node, size, kmem_cache->num);
+
+    _detach_from_list(&slab_node->snode);
+
+    if (slab_node->active >= kmem_cache->num) {
+      _merge_list(&slab_node->snode, &kmem_cache->slabs_full_head);
+    } else {
+      _merge_list(&slab_node->snode, &kmem_cache->slabs_partial_head);
+    }
+
     release_spinlock(one, &mem_lock);
     return ret;
   }
 
-  auto free_head = kalloc_page();
-  init_slab_node((SlabNode *)free_head, kmem_cache->num, false, kmem_cache);
-  kmem_cache->slabs_partial = (SlabNode *)free_head;
-  auto ret = alloc_obj(kmem_cache->slabs_partial, size, kmem_cache->num);
-  if (kmem_cache->slabs_partial->active >= kmem_cache->num) {
-    partial_to_full(kmem_cache, kmem_cache->slabs_partial);
+  auto slab_node = (SlabNode *)kalloc_page();
+  init_slab_node(slab_node, kmem_cache->num);
+  slab_node->owner_cache = kmem_cache;
+
+  _insert_into_list(&kmem_cache->slabs_partial_head, &slab_node->snode);
+  auto ret = alloc_obj(slab_node, size, kmem_cache->num);
+  if (slab_node->active >= kmem_cache->num) {
+    _detach_from_list(&slab_node->snode);
+    _merge_list(&slab_node->snode, &kmem_cache->slabs_full_head);
   }
   release_spinlock(one, &mem_lock);
   return ret;
@@ -268,10 +254,11 @@ void cache_flusharray(Array_cache_t *ac, CacheNode *cache_node) {
   flush_slab->freelist[--flush_slab->active] =
       get_obj_index(flush_slab, cache_node->object_size, cache_node->num,
                     ac->entry[ac->avail]);
+  _detach_from_list(&flush_slab->snode);
   if (flush_slab->active == cache_node->num - 1) {
-    full_to_partial(cache_node, flush_slab);
+    _insert_into_list(&cache_node->slabs_partial_head, &flush_slab->snode);
   } else if (flush_slab->active == 0) {
-    partial_to_free(cache_node, flush_slab);
+    _insert_into_list(&cache_node->slabs_free_head, &flush_slab->snode);
   }
 }
 
@@ -279,14 +266,14 @@ void kfree(void *p) {
   setup_checker(one);
   acquire_spinlock(one, &mem_lock);
   SlabNode *owner_slab = (SlabNode *)PAGE_BASE((u64)p);
-  auto kmem_cache = (CacheNode *)owner_slab->owner_cache;
+  auto kmem_cache = owner_slab->owner_cache;
   Array_cache_t *ac = &(kmem_cache->array_cache[cpuid()]);
   if (ac->avail == AC_LIMIT) {
     cache_flusharray(ac, kmem_cache);
   }
   ac->entry[ac->avail++] = p;
-  if (ac->avail == 0 && NULL == kmem_cache->slabs_full &&
-      NULL == kmem_cache->slabs_partial) {
+  if (ac->avail == 0 && _empty_list(&kmem_cache->slabs_full_head) &&
+      _empty_list(&kmem_cache->slabs_partial_head)) {
     kfree_page((void *)PAGE_BASE((u64)p));
   }
 
@@ -295,22 +282,27 @@ void kfree(void *p) {
 
 u64 left_page_cnt() {
   _acquire_spinlock(&refcnt_lock);
-  auto ret = alloc_page_cnt.count;
+  auto ret = total_page() - alloc_page_cnt.count;
   _release_spinlock(&refcnt_lock);
   return ret;
 }
 
 u32 write_page_to_disk(void *ka) {
   auto first_bno = find_and_set_8_blocks();
-  OpContext ctx;
-  bcache.begin_op(&ctx);
+  // OpContext ctx;
+  // bcache.begin_op(&ctx);
   for (u32 i = 0; i < 8; i++) {
     auto block = bcache.acquire(first_bno + i);
-    memcpy(block->data, ka + i * BLOCK_SIZE, BLOCK_SIZE);
-    bcache.sync(&ctx, block);
+    attach_pgdir(&thisproc()->pgdir);
+    PTEntriesPtr pte_p =
+        get_pte(&thisproc()->pgdir, (u64)(ka + i * BLOCK_SIZE), FALSE);
+    if (pte_p != NULL && *pte_p != 0) {
+      memcpy(block->data, (void *)(P2K(PTE_ADDRESS(*pte_p))), BLOCK_SIZE);
+      bcache.sync(NULL, block);
+    }
     bcache.release(block);
   }
-  bcache.end_op(&ctx);
+  // bcache.end_op(&ctx);
 
   return first_bno;
 }
@@ -320,23 +312,23 @@ void read_page_from_disk(void *ka, u32 bno) {
     printk("not kernel addr\n");
     PANIC();
   }
-  OpContext ctx;
-  bcache.begin_op(&ctx);
+  // OpContext ctx;
+  // bcache.begin_op(&ctx);
   for (u32 i = 0; i < 8; i++) {
     auto block = bcache.acquire(bno + i);
     memcpy(ka + i * BLOCK_SIZE, block->data, BLOCK_SIZE);
     bcache.release(block);
   }
-  bcache.end_op(&ctx);
+  // bcache.end_op(&ctx);
 }
 
 void *get_zero_page() {
-  if (zero_init) {
+  if (zero_page == NULL) {
     zero_page = kalloc_page();
-    return zero_page;
-  } else {
-    return zero_page;
   }
+  _increment_rc(&zero_page_cnt);
+  return zero_page;
 }
 
 bool check_zero_page() { return !memcmp(zero_page, 0, PAGE_SIZE); }
+//可以让全

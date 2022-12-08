@@ -1,4 +1,6 @@
 #include <driver/sd.h>
+#include <fs/block_device.h>
+#include <fs/cache.h>
 #include <kernel/cpu.h>
 #include <kernel/init.h>
 #include <kernel/printk.h>
@@ -10,13 +12,16 @@ extern void sd_init();
 extern void sd_test();
 
 NO_RETURN void idle_entry() {
+  // alloc_test();
+  // arch_stop_cpu();
   set_cpu_on();
   while (1) {
     yield();
     if (panic_flag)
       break;
     // if (cpuid() == 0) {
-    arch_with_trap { arch_wfi(); }
+    arch_with_trap { /*arch_wfi();*/
+    }
     // } else {
     //   arch_stop_cpu();
     // }
@@ -37,6 +42,7 @@ NO_RETURN void kernel_entry() {
   // user_proc_test();
   // container_test();
   // sd_test();
+  // alloc_test();
   do_rest_init();
 
   pgfault_first_test();
