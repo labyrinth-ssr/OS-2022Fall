@@ -27,7 +27,7 @@ static SpinLock mem_lock;
 static SpinLock mem_lock2;
 static SpinLock refcnt_lock;
 // static bool zero_init = true;
-u8 zero_page[PAGE_SIZE];
+static void *zero_page;
 // struct page page_arr[TOTAL_PAGE];
 RefCount zero_page_cnt;
 
@@ -59,8 +59,6 @@ int total_page() {
 // See API Reference for more information on given data structures.
 static QueueNode *pages;
 define_early_init(pages) {
-  memset(&zero_page, 0, PAGE_SIZE);
-  printk("zero data:%lld", *(i64 *)zero_page);
   for (u64 p = PAGE_BASE((u64)&end) + PAGE_SIZE; p < P2K(PHYSTOP);
        p += PAGE_SIZE) {
     // init_rc(&page_arr[page2index((void *)p)].ref);
@@ -69,12 +67,12 @@ define_early_init(pages) {
   printk("page list finish\n");
 }
 
-// define_init(zero_page) {
-//   zero_page = kalloc_page();
-//   memset(zero_page, 0, PAGE_SIZE);
-//   _increment_rc(&zero_page_cnt);
-//   _increment_rc(&alloc_page_cnt);
-// }
+define_init(zero_page) {
+  zero_page = kalloc_page();
+  memset(zero_page, 0, PAGE_SIZE);
+  _increment_rc(&zero_page_cnt);
+  // _increment_rc(&alloc_page_cnt);
+}
 
 // Allocate: fetch a page from the queue of usable pages.
 void *kalloc_page() {
@@ -86,10 +84,13 @@ void *kalloc_page() {
 
 // Free: add the page to the queue of usable pages.
 void kfree_page(void *p) {
-  if (p == &zero_page) {
+  if (p == zero_page) {
     _decrement_rc(&zero_page_cnt);
+    printk("zero cnt %lld\n", zero_page_cnt.count);
     // if (zero_page_cnt.count == 0) {
     //   _decrement_rc(&alloc_page_cnt);
+    //   zero_page = NULL;
+    //   add_to_queue(&pages, p);
     // }
   } else {
     _decrement_rc(&alloc_page_cnt);
@@ -327,9 +328,17 @@ void *get_zero_page() {
   //   zero_page = kalloc_page();
   // }
   _increment_rc(&zero_page_cnt);
-  // _increment_rc(&alloc_page_cnt);
-  return &zero_page;
+  printk("add zero %lld", zero_page_cnt.count);
+  return zero_page;
 }
 
-bool check_zero_page() { return !memcmp(&zero_page, 0, PAGE_SIZE); }
-//可以让全
+bool check_zero_page() {
+
+  for (auto i = 0; i < PAGE_SIZE; i++) {
+    if (((u8 *)zero_page)[i] != 0) {
+      return false;
+      break;
+    }
+  }
+  return true;
+}

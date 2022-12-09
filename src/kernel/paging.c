@@ -26,8 +26,6 @@ define_rest_init(paging) {
   arch_fence();
   init_block_device();
   init_bcache(get_super_block(), &block_device);
-
-  ASSERT(get_pte(&thisproc()->pgdir, 0, true));
 }
 
 void init_sections(ListNode *section_head) {
@@ -67,21 +65,22 @@ u64 sbrk(i64 size) {
   } else {
     sz *= -1;
     if (sz <= (i64)(section->end - section->begin)) {
-
       // 不需要拿section的sleeplock
       while (sz > 0) {
-
+        section->end -= PAGE_SIZE;
         PTEntriesPtr pte_p = get_pte(&thisproc()->pgdir, section->end, FALSE);
-        if (pte_p != NULL && !(*pte_p & PTE_VALID)) {
+        if (pte_p != NULL && *pte_p != 0 && !(*pte_p & PTE_VALID)) {
           release_8_blocks(*pte_p >> 12);
+          // kfree_page((void *)P2K(PTE_ADDRESS(*pte_p)));
+        } else if (pte_p != NULL && *pte_p != 0 && (*pte_p & PTE_VALID)) {
+          printk("free %p\n", (void *)P2K(PTE_ADDRESS(*pte_p)));
           kfree_page((void *)P2K(PTE_ADDRESS(*pte_p)));
-        } else if (pte_p != NULL) {
+        }
+        if (pte_p != NULL) {
           memset(pte_p, 0, sizeof(PTEntry));
         }
-        section->end -= PAGE_SIZE;
         sz -= PAGE_SIZE;
       }
-
     } else {
       printk("no enough space in heap section\n");
       PANIC();
@@ -122,19 +121,12 @@ void *alloc_page_for_user() {
 void swapout(struct pgdir *pd, struct section *st) {
   ASSERT(!(st->flags & ST_SWAP));
   st->flags |= ST_SWAP;
-  // for (i64 i = 0; i < 10; ++i) {
-  //   u64 va = (u64)i * PAGE_SIZE;
-  //   ASSERT(*(i64 *)va == i);
-  // }
-  // TODO
-  // bno = (*pte >>12)
   u64 begin = st->begin, end = st->end;
   printk("swap out %lld pages,%lld blocks, from %p to %p\n",
          (end - begin) / PAGE_SIZE, (end - begin) / PAGE_SIZE * 8,
          (void *)begin, (void *)end);
   for (u64 va = st->begin; va <= st->end; va += PAGE_SIZE) {
     PTEntriesPtr pte_p = get_pte(pd, va, FALSE);
-    // null ptr exists?
     if (pte_p != NULL && *pte_p != 0) {
       *pte_p &= ~PTE_VALID;
     }
@@ -157,15 +149,6 @@ void swapout(struct pgdir *pd, struct section *st) {
       }
     }
   }
-
-  // for (u64 p = begin; p <= end; p += PAGE_SIZE) {
-  //   PTEntriesPtr pte_p = get_pte(pd, p, FALSE);
-  //   printk("phy %p", (void *)*pte_p);
-  //   if (pte_p != NULL && *pte_p != 0) {
-
-  //   }
-  // }
-
   release_sleeplock(0, &st->sleeplock);
 }
 // Free 8 continuous disk blocks
@@ -177,7 +160,7 @@ void swapin(struct pgdir *pd, struct section *st) {
 
   for (u64 p = st->begin; p <= st->end; p += PAGE_SIZE) {
     PTEntriesPtr pte_p = get_pte(pd, p, FALSE);
-    if (pte_p != NULL /*&& *pte_p != 0*/) {
+    if (pte_p != NULL && *pte_p != 0) {
       auto page_p = alloc_page_for_user();
       read_page_from_disk((void *)page_p, *pte_p >> 12);
       release_8_blocks(*pte_p >> 12);
@@ -189,7 +172,7 @@ void swapin(struct pgdir *pd, struct section *st) {
 
   for (u64 p = st->begin; p <= st->end; p += PAGE_SIZE) {
     PTEntriesPtr pte_p = get_pte(pd, p, FALSE);
-    if (pte_p != NULL /*&& *pte_p != 0*/) {
+    if (pte_p != NULL && *pte_p != 0) {
       *pte_p |= PTE_VALID;
     }
   }
@@ -227,7 +210,7 @@ int pgfault(u64 iss) {
 
   PTEntriesPtr pte_p = get_pte(pd, addr, false);
 
-  if (pte_p == NULL /*|| *pte_p == 0*/) {
+  if (pte_p == NULL || *pte_p == 0) {
     // swapin if need?
     printk("pg fault:null lazy allocation\n");
     if (section->flags & ST_SWAP) {
@@ -235,6 +218,8 @@ int pgfault(u64 iss) {
     } else {
       auto page = alloc_page_for_user();
       vmmap(pd, addr, page, PTE_USER_DATA | PTE_RW);
+
+      printk("addr %lld pte p %p\n", addr, (void *)*get_pte(pd, addr, false));
     }
   } else if (*pte_p & PTE_RO) {
     printk("pg fault: COW\n");
@@ -270,7 +255,7 @@ void free_sections(struct pgdir *pd) {
 
     for (auto addr = section->begin; addr < section->end; addr += PAGE_SIZE) {
       PTEntriesPtr pte_p = get_pte(pd, addr, FALSE);
-      if (pte_p != NULL && !(*pte_p & PTE_VALID)) {
+      if (pte_p != NULL && !(*pte_p & PTE_VALID) && *pte_p != 0) {
         release_8_blocks(*pte_p >> 12);
       } else if (pte_p != NULL) {
         kfree_page((void *)P2K(PTE_ADDRESS(*pte_p)));
@@ -279,20 +264,4 @@ void free_sections(struct pgdir *pd) {
     _detach_from_list(p);
     kfree(section);
   }
-
-  // _for_in_list(p, &pd->section_head) {
-  //   if (p == &pd->section_head) {
-  //     continue;
-  //   }
-  //   auto section = container_of(p, struct section, stnode);
-
-  //   PTEntriesPtr pte_p = get_pte(&thisproc()->pgdir, section->end, FALSE);
-  //   if (pte_p != NULL && *pte_p != 0 && (*pte_p & PTE_VALID)) {
-  //     release_8_blocks(*pte_p >> 12);
-  //     kfree_page((void *)P2K(PTE_ADDRESS(*pte_p)));
-  //   }
-  //   if (pte_p != NULL || *pte_p != 0) {
-  //     memset(pte_p, 0, sizeof(PTEntry));
-  //   }
-  // }
 }
