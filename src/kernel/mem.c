@@ -19,9 +19,7 @@ extern char end[];
 #define COLOUR_OFF 0
 #define CPU_NUM 4
 #define AC_LIMIT 10
-// #define TOTAL_PAGE 256776
 #define P2INDEX
-// #define
 
 static SpinLock mem_lock;
 static SpinLock mem_lock2;
@@ -35,7 +33,6 @@ RefCount alloc_page_cnt;
 
 define_early_init(alloc_page_cnt) {
   init_rc(&alloc_page_cnt);
-  init_rc(&zero_page_cnt);
   init_spinlock(&mem_lock);
   init_spinlock(&mem_lock2);
 }
@@ -68,10 +65,11 @@ define_early_init(pages) {
 }
 
 define_init(zero_page) {
+  init_rc(&zero_page_cnt);
   zero_page = kalloc_page();
   memset(zero_page, 0, PAGE_SIZE);
   _increment_rc(&zero_page_cnt);
-  // _increment_rc(&alloc_page_cnt);
+  _increment_rc(&alloc_page_cnt);
 }
 
 // Allocate: fetch a page from the queue of usable pages.
@@ -86,12 +84,11 @@ void *kalloc_page() {
 void kfree_page(void *p) {
   if (p == zero_page) {
     _decrement_rc(&zero_page_cnt);
-    printk("zero cnt %lld\n", zero_page_cnt.count);
-    // if (zero_page_cnt.count == 0) {
-    //   _decrement_rc(&alloc_page_cnt);
-    //   zero_page = NULL;
-    //   add_to_queue(&pages, p);
-    // }
+    if (zero_page_cnt.count == 0) {
+      _decrement_rc(&alloc_page_cnt);
+      add_to_queue(&pages, p);
+      zero_page = NULL;
+    }
   } else {
     _decrement_rc(&alloc_page_cnt);
     add_to_queue(&pages, p);
@@ -290,8 +287,6 @@ u64 left_page_cnt() {
 
 u32 write_page_to_disk(void *ka) {
   auto first_bno = find_and_set_8_blocks();
-  // OpContext ctx;
-  // bcache.begin_op(&ctx);
   for (u32 i = 0; i < 8; i++) {
     auto block = bcache.acquire(first_bno + i);
     attach_pgdir(&thisproc()->pgdir);
@@ -303,8 +298,6 @@ u32 write_page_to_disk(void *ka) {
     }
     bcache.release(block);
   }
-  // bcache.end_op(&ctx);
-
   return first_bno;
 }
 
@@ -313,22 +306,20 @@ void read_page_from_disk(void *ka, u32 bno) {
     printk("not kernel addr\n");
     PANIC();
   }
-  // OpContext ctx;
-  // bcache.begin_op(&ctx);
   for (u32 i = 0; i < 8; i++) {
     auto block = bcache.acquire(bno + i);
     memcpy(ka + i * BLOCK_SIZE, block->data, BLOCK_SIZE);
     bcache.release(block);
   }
-  // bcache.end_op(&ctx);
 }
 
 void *get_zero_page() {
-  // if (zero_page == NULL) {
-  //   zero_page = kalloc_page();
-  // }
+  if (zero_page == NULL) {
+    zero_page = kalloc_page();
+    init_rc(&zero_page_cnt);
+    _increment_rc(&alloc_page_cnt);
+  }
   _increment_rc(&zero_page_cnt);
-  printk("add zero %lld", zero_page_cnt.count);
   return zero_page;
 }
 

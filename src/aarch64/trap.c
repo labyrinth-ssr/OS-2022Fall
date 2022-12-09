@@ -32,8 +32,9 @@ void trap_global_handler(UserContext *context) {
   case ESR_EC_IABORT_EL1:
   case ESR_EC_DABORT_EL0:
   case ESR_EC_DABORT_EL1: {
-    printk("Page fault %llu\n", ec);
     if (pgfault(iss) != 0) {
+      printk("Page fault %llu\n", ec);
+
       PANIC();
     }
     // whether to delete panic?

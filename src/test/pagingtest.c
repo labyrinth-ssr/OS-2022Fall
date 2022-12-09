@@ -50,6 +50,7 @@ void pgfault_first_test() {
     ASSERT(*(i64 *)addr == i);
   }
   sbrk(-limit);
+
   // COW
   printk("in COW\n");
   pc = left_page_cnt();
@@ -67,6 +68,7 @@ void pgfault_first_test() {
   }
   if (!check_zero_page())
     PANIC();
+
   // swap
   printk("in swap\n");
   swapout(pd, st);
@@ -97,7 +99,6 @@ void pgfault_second_test() {
   ASSERT(st);
 
   // COW + lazy allocation
-  printk("COW + lazy allocation\n");
   sbrk(limit);
   for (i64 i = 0; i < limit / 2; ++i) {
     u64 va = i * PAGE_SIZE;
@@ -108,10 +109,7 @@ void pgfault_second_test() {
     u64 va = (u64)i * PAGE_SIZE;
     *(i64 *)va = i;
   }
-  auto ret = sbrk(-limit);
-
-  printk("ret %lld\n", ret);
-
+  sbrk(-limit);
   if (!check_zero_page())
     PANIC();
 

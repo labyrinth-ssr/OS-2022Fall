@@ -87,12 +87,7 @@ void free_pgdir(struct pgdir *pgdir) {
   // TODO
   // Free pages used by the page table. If pgdir->pt=NULL, do nothing.
   // DONT FREE PAGES DESCRIBED BY THE PAGE TABLE
-  printk("before free sections pc %lld\n", left_page_cnt());
-
   free_sections(pgdir);
-
-  printk("after free sections pc %lld\n", left_page_cnt());
-
   if (pgdir->pt == NULL) {
     return;
   }
