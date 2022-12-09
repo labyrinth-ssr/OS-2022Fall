@@ -115,6 +115,15 @@ void *alloc_page_for_user() {
 
 // caller must have the pd->lock
 void swapout(struct pgdir *pd, struct section *st) {
+  while (1) {
+    _acquire_spinlock(&pd->lock);
+    if (!(&thisproc()->pgdir != pd && pd->online)) {
+      break;
+    }
+    _release_spinlock(&pd->lock);
+  }
+
+  // _release_spinlock(&pd->lock);
   ASSERT(!(st->flags & ST_SWAP));
   st->flags |= ST_SWAP;
   u64 begin = st->begin, end = st->end;
@@ -127,8 +136,9 @@ void swapout(struct pgdir *pd, struct section *st) {
 
   setup_checker(0);
   ASSERT(acquire_sleeplock(0, &st->sleeplock));
-  auto ret = _try_acquire_spinlock(&pd->lock);
-  (void)ret;
+  // if (_try_acquire_spinlock(&pd->lock)) {
+  //   // printk("swap out: not online\n");
+  // }
   _release_spinlock(&pd->lock);
 
   if (!(st->flags & ST_FILE)) {

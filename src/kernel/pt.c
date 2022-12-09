@@ -96,17 +96,20 @@ void free_pgdir(struct pgdir *pgdir) {
 
 void attach_pgdir(struct pgdir *pgdir) {
   extern PTEntries invalid_pt;
+  _acquire_spinlock(&thisproc()->pgdir.lock);
   thisproc()->pgdir.online = false;
-  if (_try_acquire_spinlock(&thisproc()->pgdir.lock)) {
-    // printk("no online yet\n");
-  } else {
-    // printk("is online,proc %d\n", thisproc()->pid);
-  }
+  // if (_try_acquire_spinlock(&thisproc()->pgdir.lock)) {
+  //   // printk("pgdir no online yet\n");
+  // } else {
+  //   // printk("pgdir is online,proc %d\n", thisproc()->pid);
+  // }
   _release_spinlock(&thisproc()->pgdir.lock);
 
   if (pgdir->pt) {
     _acquire_spinlock(&pgdir->lock);
     pgdir->online = TRUE;
+    _release_spinlock(&thisproc()->pgdir.lock);
+
     arch_set_ttbr0(K2P(pgdir->pt));
   } else {
     arch_set_ttbr0(K2P(&invalid_pt));

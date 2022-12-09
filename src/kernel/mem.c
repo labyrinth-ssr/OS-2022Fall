@@ -328,7 +328,6 @@ bool check_zero_page() {
   for (auto i = 0; i < PAGE_SIZE; i++) {
     if (((u8 *)zero_page)[i] != 0) {
       return false;
-      break;
     }
   }
   return true;
