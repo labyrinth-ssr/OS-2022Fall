@@ -1,5 +1,4 @@
 #pragma once
-
 #include <common/defines.h>
 
 // bitmap is a compact representation of boolean array.
