@@ -540,6 +540,8 @@ static int sdWaitForInterrupt(unsigned int mask) {
 
         // Clear the interrupt register completely.
         *EMMC_INTERRUPT = (u32)ival;
+        printk("time out %d\n",mask);
+        printk("count %d\n",count);
 
         return SD_TIMEOUT;
     } else if (ival & INT_ERROR_MASK) {
@@ -549,6 +551,7 @@ static int sdWaitForInterrupt(unsigned int mask) {
         // Clear the interrupt register completely.
         *EMMC_INTERRUPT = (u32)ival;
 
+        printk("error %d\n",mask);
         return SD_ERROR;
     }
 
@@ -619,6 +622,7 @@ static int sdSendCommandP(EMMCCommand* cmd, int arg) {
     // Clear interrupt flags.  This is done by setting the ones that are
     // currently set.
     //  printk("EMMC_INTERRUPT before clearing: %08x\n", *EMMC_INTERRUPT);
+    
     *EMMC_INTERRUPT = *EMMC_INTERRUPT;
 
     // Set the argument and the command code.
@@ -763,12 +767,18 @@ static int sdSendCommand(int index) {
 static int sdSendCommandA(int index, int arg) {
     // Issue APP_CMD if needed.
     int resp;
-    if (index >= IX_APP_CMD_START && (resp = sdSendAppCommand()))
+    if (index >= IX_APP_CMD_START && (resp = sdSendAppCommand())){
+        printk("a\n");
         return sdDebugResponse(resp);
+
+    }
 
     // Get the command and pass the argument through.
     if ((resp = sdSendCommandP(&sdCommandTable[index], arg)))
+    {
+        printk("io\n");
         return resp;
+    }
 
     // Check that APP_CMD was correctly interpreted.
     if (index >= IX_APP_CMD_START && sdCard.rca &&
