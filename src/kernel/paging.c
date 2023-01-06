@@ -21,11 +21,11 @@ extern BlockDevice block_device;
 define_rest_init(paging) {
   // TODO init
   // init_sections(&thisproc()->pgdir.section_head);
-  sd_init();
-  compiler_fence();
-  arch_fence();
-  init_block_device();
-  init_bcache(get_super_block(), &block_device);
+  // sd_init();
+  // compiler_fence();
+  // arch_fence();
+  // init_block_device();
+  // init_bcache(get_super_block(), &block_device);
 }
 
 void init_sections(ListNode *section_head) {

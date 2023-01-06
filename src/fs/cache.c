@@ -325,14 +325,10 @@ static void cache_free(OpContext *ctx, usize block_no) {
 }
 
 void release_8_blocks(u32 bno) {
-  // printk("release\n");
   for (usize i = bno - SWAP_START;
        i < bno - SWAP_START + 8 && i < SWAP_END - SWAP_START; i++) {
     swap_valid[i] = false;
   }
-  // for (auto i = 0; i < SWAP_END - SWAP_START; i++) {
-  //   printk("%d ", swap_valid[i]);
-  // }
 }
 
 u32 find_and_set_8_blocks() {
@@ -341,9 +337,6 @@ u32 find_and_set_8_blocks() {
   // 块号
   // OpContext ctx;
 
-  // u32 b, bi, m;
-  // Block *bp = NULL;
-  // for (u32 bno = SWAP_START; bno < SWAP_END; bno += 1) {
   u32 left = 0, right = 0;
   bool has_eight = FALSE;
   while (right < SWAP_END - SWAP_START) {
@@ -364,39 +357,6 @@ u32 find_and_set_8_blocks() {
     }
     return SWAP_START + left;
   }
-  // }
-
-  // for (b = SWAP_START; b < SWAP_END; b += BIT_PER_BLOCK) {
-  //   bp = cache_acquire(BBLOCK((u32)b, sblock));
-
-  //   u32 left = 0, right = 0;
-  //   bool has_eight = FALSE;
-
-  //   while (right < BIT_PER_BLOCK && b + right < sblock->num_blocks) {
-  //     m = (u32)(1 << (right % 8));
-  //     if ((bp->data[right / 8] & (u8)m) == 0) {
-  //       right++;
-  //       if (right - left == 8) {
-  //         has_eight = TRUE;
-  //         break;
-  //       }
-  //     } else {
-  //       left = right + 1;
-  //       right = left;
-  //     }
-  //   }
-  //   if (has_eight) {
-  //     for (bi = left; bi < right; bi++) {
-  //       m = (u32)(1 << (bi % 8));
-  //       bp->data[bi / 8] |= (u8)m;
-  //       cache_sync(&ctx, bp);
-  //       bzero(&ctx, b + bi);
-  //     }
-  //     cache_release(bp);
-  //     return left;
-  //   }
-  //   cache_release(bp);
-  // }
 
   printk("no continuous 8 blocks on disk");
   for (auto i = 0; i < SWAP_END - SWAP_START; i++) {

@@ -65,11 +65,11 @@ define_early_init(pages) {
 }
 
 define_init(zero_page) {
-  init_rc(&zero_page_cnt);
-  zero_page = kalloc_page();
-  memset(zero_page, 0, PAGE_SIZE);
-  _increment_rc(&zero_page_cnt);
-  _increment_rc(&alloc_page_cnt);
+  // init_rc(&zero_page_cnt);
+  // zero_page = kalloc_page();
+  // memset(zero_page, 0, PAGE_SIZE);
+  // _increment_rc(&zero_page_cnt);
+  // _increment_rc(&alloc_page_cnt);
 }
 
 // Allocate: fetch a page from the queue of usable pages.
