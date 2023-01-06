@@ -15,7 +15,7 @@
 
 // this lock mainly prevents concurrent access to inode list `head`, reference
 // count increment and decrement.
-static SpinLock lock;
+static Semaphore lock;
 static ListNode head;
 
 static const SuperBlock *sblock;
@@ -38,7 +38,7 @@ static INLINE u32 *get_addrs(Block *block) {
 
 // initialize inode tree.
 void init_inodes(const SuperBlock *_sblock, const BlockCache *_cache) {
-  init_spinlock(&lock);
+  init_sleeplock(&lock);
   init_list_node(&head);
   sblock = _sblock;
   cache = _cache;
@@ -118,7 +118,7 @@ static void inode_sync(OpContext *ctx, Inode *inode, bool do_write) {
 static Inode *inode_get(usize inode_no) {
   ASSERT(inode_no > 0);
   ASSERT(inode_no < sblock->num_inodes);
-  _acquire_spinlock(&lock);
+  ASSERT((wait_sem(&lock)));
   Inode *ip = NULL;
   ListNode *empty = NULL;
   _for_in_list(p, &head) {
@@ -128,7 +128,7 @@ static Inode *inode_get(usize inode_no) {
     ip = container_of(p, Inode, node);
     if (ip->inode_no == inode_no && ip->rc.count > 0) {
       _increment_rc(&ip->rc);
-      _release_spinlock(&lock);
+      post_sem(&lock);
       return ip;
     }
     if (empty == NULL && ip->rc.count == 0) {
@@ -148,7 +148,7 @@ static Inode *inode_get(usize inode_no) {
   inode_lock(ip);
   inode_sync(NULL, ip, false);
   inode_unlock(ip);
-  _release_spinlock(&lock);
+  post_sem(&lock);
   return ip;
 }
 // TODO
@@ -181,9 +181,9 @@ static void inode_clear(OpContext *ctx, Inode *inode) {
 // TODO
 // see `inode.h`.
 static Inode *inode_share(Inode *inode) {
-  _acquire_spinlock(&lock);
+  ASSERT(wait_sem(&lock));
   _increment_rc(&inode->rc);
-  _release_spinlock(&lock);
+  post_sem(&lock);
   return inode;
 }
 
@@ -192,26 +192,26 @@ static Inode *inode_share(Inode *inode) {
 static void inode_put(OpContext *ctx, Inode *inode) {
   ASSERT(inode->valid);
   // lock to protect rc read ?
-  _acquire_spinlock(&lock);
+  ASSERT(wait_sem(&lock));
   // num_links计算硬链接的数目，目前没用。
   if (inode->rc.count == 1 && inode->entry.num_links == 0) {
     inode_lock(inode);
-    _release_spinlock(&lock);
+    post_sem(&lock);
     inode_clear(ctx, inode);
     inode->entry.type = INODE_INVALID;
     inode_sync(ctx, inode, true);
     inode->valid = false;
     inode_unlock(inode);
 
-    _acquire_spinlock(&lock);
+    ASSERT(wait_sem(&lock));
     _detach_from_list(&inode->node);
-    _release_spinlock(&lock);
+    post_sem(&lock);
     _decrement_rc(&inode->rc);
     kfree(inode);
     return;
   }
   _decrement_rc(&inode->rc);
-  _release_spinlock(&lock);
+  post_sem(&lock);
 }
 
 // this function is private to inode layer, because it can allocate block
@@ -409,27 +409,27 @@ InodeTree inodes = {
  *   skipelem("a", name) = "", setting name = "a"
  *   skipelem("", name) = skipelem("////", name) = 0
  */
-static const char* skipelem(const char* path, char* name) {
-    const char* s;
-    int len;
+static const char *skipelem(const char *path, char *name) {
+  const char *s;
+  int len;
 
-    while (*path == '/')
-        path++;
-    if (*path == 0)
-        return 0;
-    s = path;
-    while (*path != '/' && *path != 0)
-        path++;
-    len = path - s;
-    if (len >= FILE_NAME_MAX_LENGTH)
-        memmove(name, s, FILE_NAME_MAX_LENGTH);
-    else {
-        memmove(name, s, len);
-        name[len] = 0;
-    }
-    while (*path == '/')
-        path++;
-    return path;
+  while (*path == '/')
+    path++;
+  if (*path == 0)
+    return 0;
+  s = path;
+  while (*path != '/' && *path != 0)
+    path++;
+  len = path - s;
+  if (len >= FILE_NAME_MAX_LENGTH)
+    memmove(name, s, FILE_NAME_MAX_LENGTH);
+  else {
+    memmove(name, s, len);
+    name[len] = 0;
+  }
+  while (*path == '/')
+    path++;
+  return path;
 }
 
 /* Look up and return the inode for a path name.
@@ -438,40 +438,41 @@ static const char* skipelem(const char* path, char* name) {
  * path element into name, which must have room for DIRSIZ bytes.
  * Must be called inside a transaction since it calls iput().
  */
-static Inode* namex(const char* path, int nameiparent, char* name, OpContext* ctx) {
-    /* TODO: Lab10 Shell */
-    return 0;
+static Inode *namex(const char *path, int nameiparent, char *name,
+                    OpContext *ctx) {
+  /* TODO: Lab10 Shell */
+  return 0;
 }
 
-Inode* namei(const char* path, OpContext* ctx) {
-    char name[FILE_NAME_MAX_LENGTH];
-    return namex(path, 0, name, ctx);
+Inode *namei(const char *path, OpContext *ctx) {
+  char name[FILE_NAME_MAX_LENGTH];
+  return namex(path, 0, name, ctx);
 }
 
-Inode* nameiparent(const char* path, char* name, OpContext* ctx) {
-    return namex(path, 1, name, ctx);
+Inode *nameiparent(const char *path, char *name, OpContext *ctx) {
+  return namex(path, 1, name, ctx);
 }
 
 /*
  * Copy stat information from inode.
  * Caller must hold ip->lock.
  */
-void stati(Inode* ip, struct stat* st) {
-    st->st_dev = 1;
-    st->st_ino = ip->inode_no;
-    st->st_nlink = ip->entry.num_links;
-    st->st_size = ip->entry.num_bytes;
-    switch (ip->entry.type) {
-    case INODE_REGULAR:
-        st->st_mode = S_IFREG;
-        break;
-    case INODE_DIRECTORY:
-        st->st_mode = S_IFDIR;
-        break;
-    case INODE_DEVICE:
-        st->st_mode = 0;
-        break;
-    default:
-        PANIC();
-    }
+void stati(Inode *ip, struct stat *st) {
+  st->st_dev = 1;
+  st->st_ino = ip->inode_no;
+  st->st_nlink = ip->entry.num_links;
+  st->st_size = ip->entry.num_bytes;
+  switch (ip->entry.type) {
+  case INODE_REGULAR:
+    st->st_mode = S_IFREG;
+    break;
+  case INODE_DIRECTORY:
+    st->st_mode = S_IFDIR;
+    break;
+  case INODE_DEVICE:
+    st->st_mode = 0;
+    break;
+  default:
+    PANIC();
+  }
 }
