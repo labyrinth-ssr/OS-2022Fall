@@ -1,3 +1,4 @@
+#include "common/defines.h"
 #include <common/sem.h>
 #include <kernel/mem.h>
 #include <kernel/printk.h>
@@ -44,6 +45,13 @@ int post_all_sem(Semaphore *sem) {
 void _lock_sem(Semaphore *sem) { _acquire_spinlock(&sem->lock); }
 
 void _unlock_sem(Semaphore *sem) { _release_spinlock(&sem->lock); }
+
+void sleep(Semaphore *sem) {
+  get_all_sem(sem);
+  ASSERT(wait_sem(sem));
+}
+
+void wakeup(Semaphore *sem) { post_all_sem(sem); }
 
 bool _wait_sem(Semaphore *sem, bool alertable) {
   setup_checker(0);

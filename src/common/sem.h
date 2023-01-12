@@ -16,6 +16,8 @@ typedef struct {
   ListNode sleeplist;
 } Semaphore;
 void init_sem(Semaphore *, int val);
+void sleep(Semaphore *);
+void wakeup(Semaphore *);
 int get_all_sem(Semaphore *);
 int post_all_sem(Semaphore *);
 bool _get_sem(Semaphore *);
@@ -50,10 +52,8 @@ void _post_sem(Semaphore *);
 #define init_sleeplock(lock) init_sem(lock, 1)
 #define acquire_sleeplock(checker, lock)                                       \
   (checker_begin_ctx(checker), wait_sem(lock))
-#define _acquire_sleeplock(lock) (wait_sem(lock))
 
 #define unalertable_acquire_sleeplock(checker, lock)                           \
   (checker_begin_ctx(checker), unalertable_wait_sem(lock))
 #define release_sleeplock(checker, lock)                                       \
   (post_sem(lock), checker_end_ctx(checker))
-#define _release_sleeplock(lock) (post_sem(lock))

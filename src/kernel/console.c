@@ -62,7 +62,7 @@ isize console_read(Inode *ip, char *dst, isize n) {
         inodes.lock(ip);
         return -1;
       }
-      ASSERT((_acquire_sleeplock(&slplock)));
+      sleep(&slplock);
     }
     int c = input.buf[input.r++ % INPUT_BUF];
     if (c == C('D')) {
@@ -74,7 +74,6 @@ isize console_read(Inode *ip, char *dst, isize n) {
     }
     *dst++ = c;
     n--;
-    // maybe
     if (c == '\n') {
       break;
     }
@@ -87,18 +86,34 @@ isize console_read(Inode *ip, char *dst, isize n) {
 // TODO
 void console_intr(char (*getc)()) {
   int c = 0;
+  _acquire_spinlock(&lock);
 
-  while (1) {
-    char c = uart_get_char();
-    if (c == (char)-1)
-      break;
-    _acquire_spinlock(&lock);
+  while ((c = getc()) != 0xff) {
     switch (c) {
     case C('U'):
       while (input.e != input.w && input.buf[(input.e) % INPUT_BUF != '\n']) {
         input.e--;
-        uart_put_char(c);
+        consputc(BACKSPACE);
       }
+    case '\x7f': // Backspace
+      if (input.e != input.w) {
+        input.e--;
+        consputc(BACKSPACE);
+      }
+      break;
+    default:
+      // make sure buf has enough space
+      if (c != 0 && input.e - input.r < INPUT_BUF) {
+        c = (c == '\r') ? '\n' : c;
+        input.buf[input.e++ % INPUT_BUF] = c;
+        consputc(c);
+        if (c == '\n' || c == C('D') || input.e == input.r + INPUT_BUF) {
+          input.w = input.e;
+          wakeup(&slplock);
+        }
+      }
+      break;
     }
   }
+  _release_spinlock(&lock);
 }
