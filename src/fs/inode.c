@@ -10,6 +10,7 @@
 #include "kernel/proc.h"
 #include <common/string.h>
 #include <fs/inode.h>
+#include <kernel/console.h>
 #include <kernel/mem.h>
 #include <kernel/printk.h>
 #include <sys/stat.h>
@@ -265,6 +266,10 @@ static usize inode_map(OpContext *ctx, Inode *inode, usize offset,
 // see `inode.h`.
 static usize inode_read(Inode *inode, u8 *dest, usize offset, usize count) {
   InodeEntry *entry = &inode->entry;
+  if (inode->entry.type == INODE_DEVICE) {
+    ASSERT(inode->entry.major == 1);
+    return console_read(inode, (void *)dest, count);
+  }
   if (count + offset > entry->num_bytes)
     count = entry->num_bytes - offset;
   usize end = offset + count;

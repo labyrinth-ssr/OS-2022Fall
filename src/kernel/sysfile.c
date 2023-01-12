@@ -13,6 +13,7 @@
 #include <common/string.h>
 #include <fs/file.h>
 #include <fs/fs.h>
+#include <fs/inode.h>
 #include <fs/pipe.h>
 #include <kernel/mem.h>
 #include <kernel/paging.h>
@@ -20,6 +21,7 @@
 #include <kernel/proc.h>
 #include <kernel/sched.h>
 #include <sys/syscall.h>
+
 
 struct iovec {
   void *iov_base; /* Starting address. */
@@ -39,6 +41,12 @@ static struct file *fd2file(int fd) {
 int fdalloc(struct file *f) {
   /* TODO: Lab10 Shell */
   return -1;
+}
+
+define_syscall(ioctl, int fd, u64 request) {
+  ASSERT(request == 0x5413);
+  (void)fd;
+  return 0;
 }
 
 /*
@@ -149,6 +157,61 @@ define_syscall(newfstatat, int dirfd, const char *path, struct stat *st,
   return 0;
 }
 
+define_syscall(unlink, const char *path) {
+  Inode *ip, *dp;
+  DirEntry de;
+  char name[FILE_NAME_MAX_LENGTH];
+  u32 off;
+  if (!user_strlen(path, 256))
+    return -1;
+  OpContext ctx;
+  bcache.begin_op(&ctx);
+  if ((dp = nameiparent(path, name, &ctx)) == 0) {
+    bcache.end_op(&ctx);
+    return -1;
+  }
+
+  inodes.lock(dp);
+
+  // Cannot unlink "." or "..".
+  if (strncmp(name, ".", FILE_NAME_MAX_LENGTH) == 0 ||
+      strncmp(name, "..", FILE_NAME_MAX_LENGTH) == 0)
+    goto bad;
+
+  if ((ip = inodes.lookup(dp, name, &off)) == 0)
+    goto bad;
+  inodes.lock(ip);
+
+  if (ip->entry.num_links < 1)
+    PANIC();
+  if (ip->entry.type == INODE_DIRECTORY && !isdirempty(ip)) {
+    inodes.unlock(ip);
+    inodes.put(&ctx, ip);
+    goto bad;
+  }
+
+  memset(&de, 0, sizeof(de));
+  if (inodes.write(dp, 0, (u64)&de, off, sizeof(de)) != sizeof(de))
+    PANIC();
+  if (ip->entry.type == INODE_DIRECTORY) {
+    dp->entry.num_links--;
+    inodes.sync(&ctx, dp, true);
+  }
+  inodes.unlock(dp);
+  inodes.put(&ctx, dp);
+  ip->entry.num_links--;
+  inodes.sync(&ctx, ip, true);
+  inodes.unlock(ip);
+  inodes.put(&ctx, ip);
+  bcache.end_op(&ctx);
+  return 0;
+
+bad:
+  inodes.unlock(dp);
+  inodes.put(&ctx, dp);
+  bcache.end_op(&ctx);
+  return -1;
+}
 /*
  * Create an inode.
  *
