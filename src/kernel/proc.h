@@ -57,3 +57,4 @@ WARN_RESULT int wait(int *exitcode, int *pid);
 WARN_RESULT int kill(int pid);
 WARN_RESULT int fork();
 struct proc *get_offline_proc();
+bool is_killed(struct proc *proc);
