@@ -6,6 +6,7 @@
 #include "common/spinlock.h"
 #include "fs/cache.h"
 #include "fs/defines.h"
+#include "kernel/console.h"
 #include "kernel/proc.h"
 #include <common/string.h>
 #include <fs/inode.h>
@@ -292,6 +293,11 @@ static usize inode_write(OpContext *ctx, Inode *inode, u8 *src, usize offset,
                          usize count) {
   InodeEntry *entry = &inode->entry;
   usize end = offset + count;
+  if (inode->entry.type == INODE_DEVICE) {
+    // what is a major device?
+    ASSERT(inode->entry.major == 1);
+    return console_write(inode, (char *)src, count);
+  }
   ASSERT(offset <= entry->num_bytes);
   ASSERT(end <= INODE_MAX_BYTES);
   ASSERT(offset <= end);
