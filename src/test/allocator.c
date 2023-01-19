@@ -49,6 +49,7 @@ void alloc_test() {
     FAIL("FAIL: alloc_page_cnt %d -> %lld\n", r, alloc_page_cnt.count);
   SYNC(3)
   for (int j = 0; j < 10000;) {
+
     if (j < 1000 || rand() > RAND_MAX / 16 * 7) {
       int z = 0;
       int r = rand() & 255;

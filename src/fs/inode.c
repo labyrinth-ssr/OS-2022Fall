@@ -8,6 +8,7 @@
 #include "fs/defines.h"
 #include "kernel/console.h"
 #include "kernel/proc.h"
+#include "kernel/sched.h"
 #include <common/string.h>
 #include <fs/inode.h>
 #include <kernel/console.h>
@@ -60,7 +61,7 @@ static void init_inode(Inode *inode) {
   inode->valid = false;
 }
 
-// TODO
+// Modified
 // see `inode.h`.
 //遍历，在磁盘上找invalid的dinode
 static usize inode_alloc(OpContext *ctx, InodeType type) {
@@ -83,21 +84,21 @@ static usize inode_alloc(OpContext *ctx, InodeType type) {
   PANIC();
 }
 
-// TODO
+// Modified
 // see `inode.h`.
 static void inode_lock(Inode *inode) {
   ASSERT(inode->rc.count > 0);
   ASSERT(wait_sem(&inode->lock));
 }
 
-// TODO
+// Modified
 // see `inode.h`.
 static void inode_unlock(Inode *inode) {
   ASSERT(inode->rc.count > 0);
   post_sem(&inode->lock);
 }
 
-// TODO
+// Modified
 // see `inode.h`.
 static void inode_sync(OpContext *ctx, Inode *inode, bool do_write) {
   usize inode_no = inode->inode_no;
@@ -116,7 +117,7 @@ static void inode_sync(OpContext *ctx, Inode *inode, bool do_write) {
 // see `inode.h`.
 // 直接分配inode。
 // 新alloc的entry或empty的entry没有对应inode_no
-// TODO
+// Modified
 static Inode *inode_get(usize inode_no) {
   ASSERT(inode_no > 0);
   ASSERT(inode_no < sblock->num_inodes);
@@ -153,7 +154,7 @@ static Inode *inode_get(usize inode_no) {
   post_sem(&lock);
   return ip;
 }
-// TODO
+// Modified
 // see `inode.h`.
 static void inode_clear(OpContext *ctx, Inode *inode) {
   InodeEntry *entry = &inode->entry;
@@ -180,7 +181,7 @@ static void inode_clear(OpContext *ctx, Inode *inode) {
   inode_sync(ctx, inode, true);
 }
 
-// TODO
+// Modified
 // see `inode.h`.
 static Inode *inode_share(Inode *inode) {
   ASSERT(wait_sem(&lock));
@@ -189,7 +190,7 @@ static Inode *inode_share(Inode *inode) {
   return inode;
 }
 
-// TODO
+// Modified
 // see `inode.h`.
 static void inode_put(OpContext *ctx, Inode *inode) {
   ASSERT(inode->valid);
@@ -225,7 +226,7 @@ static void inode_put(OpContext *ctx, Inode *inode) {
 // the block number is returned.
 //
 // NOTE: caller must hold the lock of `inode`.
-// TODO
+// Modified
 static usize inode_map(OpContext *ctx, Inode *inode, usize offset,
                        bool *modified) {
   InodeEntry *entry = &inode->entry;
@@ -262,7 +263,7 @@ static usize inode_map(OpContext *ctx, Inode *inode, usize offset,
   PANIC();
 }
 
-// TODO
+// Modified
 // see `inode.h`.
 static usize inode_read(Inode *inode, u8 *dest, usize offset, usize count) {
   InodeEntry *entry = &inode->entry;
@@ -292,7 +293,7 @@ static usize inode_read(Inode *inode, u8 *dest, usize offset, usize count) {
   return 0;
 }
 
-// TODO
+// Modified
 // see `inode.h`.
 static usize inode_write(OpContext *ctx, Inode *inode, u8 *src, usize offset,
                          usize count) {
@@ -325,7 +326,7 @@ static usize inode_write(OpContext *ctx, Inode *inode, u8 *src, usize offset,
   return count;
 }
 
-// TODO
+// Modified
 // see `inode.h`.
 static usize inode_lookup(Inode *inode, const char *name, usize *index) {
   InodeEntry *entry = &inode->entry;
@@ -376,7 +377,7 @@ static usize inode_insert(OpContext *ctx, Inode *inode, const char *name,
   strncpy(de.name, name, FILE_NAME_MAX_LENGTH);
   de.inode_no = inode_no;
   inode_write(ctx, inode, (void *)&de, off, sizeof(de));
-  // TODO
+  // Modified
   return off;
 }
 
@@ -387,7 +388,7 @@ static void inode_remove(OpContext *ctx, Inode *inode, usize index) {
   DirEntry de;
   memset(&de, 0, sizeof(de));
   inode_write(ctx, inode, (void *)&de, index, sizeof(de));
-  // TODO
+  // Modified
 }
 
 InodeTree inodes = {
@@ -449,10 +450,41 @@ static const char *skipelem(const char *path, char *name) {
  * path element into name, which must have room for DIRSIZ bytes.
  * Must be called inside a transaction since it calls iput().
  */
+// 路径上的目录全部都share
 static Inode *namex(const char *path, int nameiparent, char *name,
                     OpContext *ctx) {
-  /* TODO: Lab10 Shell */
-  return 0;
+  /* Modified: Lab10 Shell */
+  Inode *ip, *next;
+
+  if (*path == '/')
+    ip = inode_get(ROOT_INODE_NO);
+  else
+    ip = inode_share(thisproc()->cwd);
+
+  while ((path = skipelem(path, name)) != 0) {
+    inode_lock(ip);
+    if (ip->entry.type != INODE_DIRECTORY) {
+      // inode_unlock(ip);
+      inode_put(ctx, ip);
+      return 0;
+    }
+    if (nameiparent && *path == '\0') {
+      // Stop one level early.
+      inode_unlock(ip);
+      return ip;
+    }
+    if ((next = (Inode *)inode_lookup(ip, name, 0)) == 0) {
+      inode_unlock(ip);
+      return 0;
+    }
+    inode_unlock(ip);
+    ip = next;
+  }
+  if (nameiparent) {
+    inode_put(ctx, ip);
+    return 0;
+  }
+  return ip;
 }
 
 Inode *namei(const char *path, OpContext *ctx) {

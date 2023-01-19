@@ -1,10 +1,13 @@
 #include "aarch64/intrinsic.h"
+#include "aarch64/mmu.h"
 #include "common/defines.h"
 #include "common/sem.h"
 #include "common/spinlock.h"
+#include "fs/inode.h"
 #include "kernel/pt.h"
 #include <common/list.h>
 #include <common/string.h>
+#include <kernel/container.h>
 #include <kernel/init.h>
 #include <kernel/mem.h>
 #include <kernel/printk.h>
@@ -36,7 +39,7 @@ void set_parent_to_this(struct proc *proc) {
   _acquire_spinlock(&plock);
   // printk("set parent,child:%d,parent:%d\n", proc->pid, thisproc()->pid);
   auto this = thisproc();
-  proc->parent = thisproc();
+  proc->parent = this;
   _insert_into_list(&this->children, &proc->ptnode);
   _release_spinlock(&plock);
 }
@@ -268,4 +271,39 @@ struct proc *get_offline_proc() {
  * Sets up stack to return as if from system call.
  */
 void trap_return();
-int fork() { /* TODO: Your code here. */ }
+int fork() { /* TODO: Your code here. */
+  int i, pid;
+  struct proc *np;
+  struct proc *p = thisproc();
+
+  // Allocate process.
+  if ((np = create_proc()) == 0) {
+    return -1;
+  }
+  _acquire_spinlock(&plock);
+  // Copy user memory from parent to child.
+  uvmcopy(&p->pgdir, &np->pgdir, PAGE_SIZE);
+  // if (uvmcopy(p->pagetable, np->pagetable, p->sz) < 0) {
+  //   freeproc(np);
+  //   release(&np->lock);
+  //   return -1;
+  // }
+  // np->sz = p->sz;
+
+  // copy saved user registers.
+  *np->ucontext = *p->ucontext;
+  p->ucontext->x[0] = 0; // Cause fork to return 0 in the child.
+
+  // increment reference counts on open file descriptors.
+  for (i = 0; i < NOFILE; i++)
+    if (p->oftable.ofile[i])
+      np->oftable.ofile[i] = filedup(p->oftable.ofile[i]);
+  np->cwd = inodes.share(p->cwd);
+  pid = np->pid;
+  _release_spinlock(&plock);
+  set_parent_to_this(np);
+  _acquire_sched_lock();
+  np->state = RUNNABLE;
+  _release_sched_lock();
+  return pid;
+}

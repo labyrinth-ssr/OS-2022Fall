@@ -7,7 +7,7 @@
 #include <kernel/sched.h>
 
 int pipeAlloc(File **f0, File **f1) {
-  // TODO
+  // Modified
   struct pipe *pi = NULL;
   if ((*f0 = filealloc()) == 0 || (*f1 = filealloc()) == 0)
     goto bad;
@@ -41,7 +41,7 @@ bad:
 }
 
 void pipeClose(Pipe *pi, int writable) {
-  // TODO
+  // Modified
   _acquire_spinlock(&pi->lock);
   if (writable) {
     pi->writeopen = 0;
@@ -59,7 +59,7 @@ void pipeClose(Pipe *pi, int writable) {
 }
 
 int pipeWrite(Pipe *pi, u64 addr, int n) {
-  // TODO
+  // Modified
   int i = 0;
   struct proc *pr = thisproc();
   _acquire_spinlock(&pi->lock);
@@ -84,7 +84,7 @@ int pipeWrite(Pipe *pi, u64 addr, int n) {
 }
 
 int pipeRead(Pipe *pi, u64 addr, int n) {
-  // TODO
+  // Modified
   int i;
   struct proc *pr = thisproc();
   char ch;

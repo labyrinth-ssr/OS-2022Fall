@@ -63,7 +63,7 @@ static void init_block(Block *block) {
 }
 // see `cache.h`.
 static usize get_num_cached_blocks() {
-  // TODO
+  // Modified
   int cnt = 0;
   _for_in_list(p, &head) {
     if (p == &head) {
@@ -76,7 +76,7 @@ static usize get_num_cached_blocks() {
 // see `cache.h`.
 
 static Block *cache_acquire(usize block_no) {
-  // TODO
+  // Modified
   _acquire_spinlock(&lock);
   _for_in_list(p, &head) {
     if (p == &head) {
@@ -122,7 +122,7 @@ static Block *cache_acquire(usize block_no) {
 
 // see `cache.h`.
 static void cache_release(Block *block) {
-  // TODO
+  // Modified
   _acquire_spinlock(&lock);
   block->acquired = false;
   _detach_from_list(&block->node);
@@ -158,7 +158,7 @@ void recover_from_log() {
 void init_bcache(const SuperBlock *_sblock, const BlockDevice *_device) {
   sblock = _sblock;
   device = _device;
-  // TODO
+  // Modified
   init_spinlock(&lock);
   init_list_node(&head);
 
@@ -178,7 +178,7 @@ void init_bcache(const SuperBlock *_sblock, const BlockDevice *_device) {
 
 // see `cache.h`.
 static void cache_begin_op(OpContext *ctx) {
-  // TODO
+  // Modified
   while (1) {
     _acquire_spinlock(&log.lock);
     if (log.committing) {
@@ -200,7 +200,7 @@ static void cache_begin_op(OpContext *ctx) {
 
 // see `cache.h`.
 static void cache_sync(OpContext *ctx, Block *block) {
-  // TODO
+  // Modified
   if (ctx != NULL) {
     _acquire_spinlock(&log.lock);
     bool not_allocated = true;
@@ -252,7 +252,7 @@ void commit() {
 }
 
 static void cache_end_op(OpContext *ctx) {
-  // TODO
+  // Modified
   _acquire_spinlock(&log.lock);
   log.outstanding--;
   log.op_reserved -= ctx->rm;
@@ -286,7 +286,7 @@ void bzero(OpContext *ctx, u32 block_no) {
 }
 
 static usize cache_alloc(OpContext *ctx) {
-  // TODO
+  // Modified
   u32 b, bi, m;
   Block *bp = NULL;
   for (b = 0; b < sblock->num_blocks; b += BIT_PER_BLOCK) {
@@ -310,7 +310,7 @@ static usize cache_alloc(OpContext *ctx) {
 // see `cache.h`.
 // hint: you can use `cache_acquire`/`cache_sync` to read/write blocks.
 static void cache_free(OpContext *ctx, usize block_no) {
-  // TODO
+  // Modified
   Block *bp;
   int bi, m;
   bp = cache_acquire(BBLOCK(block_no, sblock));
@@ -333,7 +333,7 @@ void release_8_blocks(u32 bno) {
 
 u32 find_and_set_8_blocks() {
 
-  // TODO:在swap分区中找到8个连续的块，并返回第一个块的
+  // Modified:在swap分区中找到8个连续的块，并返回第一个块的
   // 块号
   // OpContext ctx;
 

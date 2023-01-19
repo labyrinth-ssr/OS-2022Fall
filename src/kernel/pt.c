@@ -94,6 +94,46 @@ void free_pgdir(struct pgdir *pgdir) {
   free_pt_r(pgdir->pt, 0);
 }
 
+// Given a parent process's page table, copy
+// its memory into a child's page table.
+// Copies both the page table and the
+// physical memory.
+// returns 0 on success, -1 on failure.
+// frees any allocated pages on failure.
+int uvmcopy(struct pgdir *old, struct pgdir *new, u64 sz) {
+  PTEntry *pte_p;
+  u64 pa, i;
+  // u32 flags;
+  char *mem;
+  for (i = 0; i < sz; i += PAGE_SIZE) {
+    if ((pte_p = get_pte(old, i, false)) == 0)
+      panic("uvmcopy: pte should exist");
+    if ((*pte_p & PTE_VALID) == 0)
+      panic("uvmcopy: page not present");
+    pa = P2K(PTE_ADDRESS(*pte_p));
+    // flags = PTE_FLAGS(*pte_p);
+    if ((mem = kalloc_page()) == 0)
+      panic("no free page\n");
+    // goto err;
+    memmove(mem, (char *)pa, PAGE_SIZE);
+    // create pte for virtual address, return 0 if success.
+    auto pte_p = get_pte(new, i, true);
+    if (pte_p == NULL) {
+      panic("alloc pte fail");
+    }
+    *pte_p = K2P(mem) | PTE_USER_DATA;
+    // if (mappages(new, i, PGSIZE, (uint64)mem, flags) != 0) {
+    //   kfree(mem);
+    //   // goto err;
+    // }
+  }
+  return 0;
+
+  // err:
+  //   uvmunmap(new, 0, i / PGSIZE, 1);
+  //   return -1;
+}
+
 /*
  * Copy len bytes from p to user address va in page table pgdir.
  * Allocate physical pages if required.
@@ -101,6 +141,25 @@ void free_pgdir(struct pgdir *pgdir) {
  */
 int copyout(struct pgdir *pd, void *va, void *p, usize len) {
   // TODO
+  char *buf;
+  u64 pa0;
+  u64 n, va0;
+  buf = p;
+  while (len > 0) {
+    va0 = (u64)ROUNDDOWN(va, PAGE_SIZE);
+    // FIXME
+    pa0 = P2K(PTE_ADDRESS(*get_pte(pd, (u64)va, true)));
+    if (pa0 == 0)
+      return -1;
+    n = PAGE_SIZE - ((u64)va - va0);
+    if (n > len)
+      n = len;
+    memmove((void *)(pa0 + ((u64)va - va0)), buf, n);
+    len -= n;
+    buf += n;
+    va = (void *)(va0 + PAGE_SIZE);
+  }
+  return 0;
 }
 void attach_pgdir(struct pgdir *pgdir) {
   extern PTEntries invalid_pt;
@@ -112,11 +171,20 @@ void attach_pgdir(struct pgdir *pgdir) {
     _acquire_spinlock(&pgdir->lock);
     pgdir->online = TRUE;
     _release_spinlock(&thisproc()->pgdir.lock);
-
     arch_set_ttbr0(K2P(pgdir->pt));
   } else {
     arch_set_ttbr0(K2P(&invalid_pt));
   }
+}
+
+u64 uva2ka(struct pgdir *pgdir, u64 uva) {
+  // FIXME:alloc or not
+  u64 *pte = get_pte(pgdir, uva, 0);
+  if ((*pte & (PTE_VALID)) == 0)
+    return 0;
+  if (((*pte) & PTE_USER) == 0)
+    return 0;
+  return P2K(PTE_ADDRESS(*pte));
 }
 
 // 在给定的页表上，建立虚拟地址到物理地址的映射

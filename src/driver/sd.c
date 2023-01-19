@@ -98,7 +98,7 @@ void sd_init() {
    * 2.Remember to call sd_init() at somewhere.
    * 3.the first number is 0.
    * 4.don't forget to call this function somewhere
-   * TODO: Lab5 driver.
+   * Modified: Lab5 driver.
    */
   sdInit();
   init_spinlock(&sdlock);
@@ -208,7 +208,7 @@ void sd_intr() {
    * You may use some buflist functions, arch_dsb_sy(), sd_start(), post_sem()
    * and sdWaitForInterrupt() to complete this function.
    *
-   * TODO: Lab5 driver.
+   * Modified: Lab5 driver.
    */
   bufqueue_lock(&bqueue);
   auto b = bufqueue_front(&bqueue);
@@ -257,7 +257,7 @@ void sdrw(buf *b) {
    *
    * You may use some buflist functions, arch_dsb_sy(),
    * sd_start(), wait_sem() to complete this function.
-   *  TODO: Lab5 driver.
+   *  Modified: Lab5 driver.
    */
   init_sem(&rw_done, 0);
   bufqueue_lock(&bqueue);

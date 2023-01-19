@@ -17,7 +17,7 @@ struct container {
   struct schinfo schinfo;
   struct schqueue schqueue;
 
-  // TODO: namespace (local pid?)
+  // Modified: namespace (local pid?)
   SpinLock pid_lock;
   struct pid_pool pids;
   int id;

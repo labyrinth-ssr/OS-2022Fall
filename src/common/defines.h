@@ -26,19 +26,31 @@ typedef i64 isize;
 typedef u64 usize;
 
 /* Efficient min and max operations */
-#define MIN(_a, _b) \
-    ({ \
-        typeof(_a) __a = (_a); \
-        typeof(_b) __b = (_b); \
-        __a <= __b ? __a : __b; \
-    })
+#define MIN(_a, _b)                                                            \
+  ({                                                                           \
+    typeof(_a) __a = (_a);                                                     \
+    typeof(_b) __b = (_b);                                                     \
+    __a <= __b ? __a : __b;                                                    \
+  })
 
-#define MAX(_a, _b) \
-    ({ \
-        typeof(_a) __a = (_a); \
-        typeof(_b) __b = (_b); \
-        __a >= __b ? __a : __b; \
-    })
+#define MAX(_a, _b)                                                            \
+  ({                                                                           \
+    typeof(_a) __a = (_a);                                                     \
+    typeof(_b) __b = (_b);                                                     \
+    __a >= __b ? __a : __b;                                                    \
+  })
+
+#define ROUNDDOWN(a, n)                                                        \
+  ({                                                                           \
+    u64 __a = (u64)(a);                                                        \
+    (typeof(a))(__a - __a % (n));                                              \
+  })
+
+#define ROUNDUP(a, n)                                                          \
+  ({                                                                           \
+    u64 __n = (u64)(n);                                                        \
+    (typeof(a))(ROUNDDOWN((u64)(a) + __n - 1, __n));                           \
+  })
 
 #define BIT(i) (1ull << (i))
 
@@ -48,13 +60,13 @@ typedef u64 usize;
 #define ALWAYS_INLINE inline __attribute__((unused, always_inline))
 #define NO_INLINE __attribute__((noinline))
 #define NO_IPA __attribute__((noipa))
-#define WARN_RESULT __attribute__ ((warn_unused_result))
+#define WARN_RESULT __attribute__((warn_unused_result))
 
 // NOTE: no_return will disable traps.
 // NO_RETURN NO_INLINE void no_return();
 
 // `offset_of` returns the offset of `member` inside struct `type`.
-#define offset_of(type, member) ((usize)(&((type*)NULL)->member))
+#define offset_of(type, member) ((usize)(&((type *)NULL)->member))
 
 // assume `mptr` is a pointer to `member` inside struct `type`, this
 // macro returns the pointer to the "container" struct `type`.
@@ -69,27 +81,23 @@ typedef u64 usize;
 // > ListNode b = &a.node;
 //
 // then `container_of(b, Container, node)` will be the same as `&a`.
-#define container_of(mptr, type, member) \
-    ({ \
-        const typeof(((type*)NULL)->member)* _mptr = (mptr); \
-        (type*)((u8*)_mptr - offset_of(type, member)); \
-    })
+#define container_of(mptr, type, member)                                       \
+  ({                                                                           \
+    const typeof(((type *)NULL)->member) *_mptr = (mptr);                      \
+    (type *)((u8 *)_mptr - offset_of(type, member));                           \
+  })
 
 // return the largest c that c is a multiple of b and c <= a.
-static INLINE u64 round_down(u64 a, u64 b) {
-    return a - a % b;
-}
+static INLINE u64 round_down(u64 a, u64 b) { return a - a % b; }
 
 // return the smallest c that c is a multiple of b and c >= a.
-static INLINE u64 round_up(u64 a, u64 b) {
-    return round_down(a + b - 1, b);
-}
+static INLINE u64 round_up(u64 a, u64 b) { return round_down(a + b - 1, b); }
 
 // panic
-NO_INLINE NO_RETURN void _panic(const char*, int);
+NO_INLINE NO_RETURN void _panic(const char *, int);
 #define PANIC() _panic(__FILE__, __LINE__)
-#define ASSERT(expr) \
-    ({ \
-        if (!(expr)) \
-            PANIC(); \
-    })
+#define ASSERT(expr)                                                           \
+  ({                                                                           \
+    if (!(expr))                                                               \
+      PANIC();                                                                 \
+  })

@@ -1,4 +1,6 @@
 #include "aarch64/intrinsic.h"
+#include "common/defines.h"
+#include "kernel/container.h"
 #include <common/rc.h>
 #include <common/sem.h>
 #include <common/string.h>
@@ -163,3 +165,5 @@ void container_test() {
   for (int i = 0; i < 22; i++)
     printk("Proc %d: %llu\n", i, proc_cnt[i]);
 }
+
+void shell() {}

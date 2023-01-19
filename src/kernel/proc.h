@@ -1,14 +1,13 @@
 #pragma once
 
-#include "kernel/paging.h"
 #include <common/defines.h>
 #include <common/list.h>
 #include <common/sem.h>
+#include <kernel/paging.h>
 // #include <kernel/container.h>
 #include <fs/file.h>
 #include <fs/inode.h>
 
-#define NOFILE 1024 /* open files per process */
 #include <kernel/pt.h>
 #include <kernel/schinfo.h>
 
@@ -16,8 +15,9 @@ enum procstate { UNUSED, RUNNABLE, RUNNING, SLEEPING, DEEPSLEEPING, ZOMBIE };
 
 typedef struct UserContext {
   // TODO: customize your trap frame
-  u64 lr, sp, spsr, elr;
-  u64 x[18];
+  u64 lr, sp, spsr, elr, tpidr;
+  u64 x[31];
+  u64 q0[2];
 } UserContext;
 
 typedef struct KernelContext {
@@ -45,6 +45,8 @@ struct proc {
   UserContext *ucontext;
   KernelContext *kcontext;
   struct oftable oftable;
+  char name[16];
+  // Open files
   Inode *cwd; // current working dictionary
 };
 

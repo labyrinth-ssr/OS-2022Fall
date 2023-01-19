@@ -83,7 +83,7 @@ isize console_read(Inode *ip, char *dst, isize n) {
   return target - n;
 }
 
-// TODO
+// Modofied
 void console_intr(char (*getc)()) {
   int c = 0;
   _acquire_spinlock(&lock);
@@ -95,6 +95,7 @@ void console_intr(char (*getc)()) {
         input.e--;
         consputc(BACKSPACE);
       }
+      break;
     case '\x7f': // Backspace
       if (input.e != input.w) {
         input.e--;
