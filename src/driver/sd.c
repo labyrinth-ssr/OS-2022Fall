@@ -1,4 +1,5 @@
 #include "common/defines.h"
+#include "kernel/printk.h"
 #include <common/sem.h>
 #include <driver/sddef.h>
 #include <kernel/mem.h>
@@ -107,6 +108,7 @@ void sd_init() {
   set_interrupt_handler(IRQ_SDIO, sd_intr);
 
   auto get_MBR = (buf *)kalloc(sizeof(buf));
+  printk("get MBR:%p", get_MBR);
   memset(get_MBR, 0, sizeof(*get_MBR));
 
   // bufqueue_lock(&bqueue);
@@ -167,7 +169,7 @@ static void sd_start(struct buf *b) {
 
   int done = 0;
   u32 *intbuf = (u32 *)b->data;
-  if (!(((i64)b->data) & 0x03) == 0) {
+  if ((((i64)b->data) & 0x03) != 0) {
     printk("Only support word-aligned buffers. \n");
     PANIC();
   }

@@ -1,3 +1,4 @@
+#include "aarch64/intrinsic.h"
 #include <common/sem.h>
 #include <kernel/mem.h>
 #include <kernel/printk.h>
@@ -118,14 +119,18 @@ static void proc_test_1() {
   init_sem(&s5, 0);
   init_sem(&s6, 0);
   int pid[10];
+  printk("3\n");
   for (int i = 0; i < 10; i++) {
     auto p = create_proc();
     set_parent_to_this(p);
     pid[i] = start_proc(p, proc_test_1a, i);
   }
+  printk("cpu %d i:\n", cpuid());
+
   for (int i = 0; i < 10; i++) {
     int code, id, t;
     id = wait(&code, &t);
+    printk("i2:%d ", i);
     ASSERT(pid[code] == id);
     printk("proc %d exit\n", code);
   }
@@ -136,8 +141,12 @@ static void proc_test_1() {
 
 void proc_test() {
   printk("proc_test\n");
+
   auto p = create_proc();
+  printk("0\n");
+
   int pid = start_proc(p, proc_test_1, 0);
+  printk("1\n");
   int t = 0;
   while (1) {
     int code, a;

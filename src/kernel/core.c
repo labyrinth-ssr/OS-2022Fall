@@ -1,6 +1,9 @@
+#include "fs/fs.h"
+#include "kernel/proc.h"
 #include <driver/sd.h>
 #include <fs/block_device.h>
 #include <fs/cache.h>
+#include <kernel/container.h>
 #include <kernel/cpu.h>
 #include <kernel/init.h>
 #include <kernel/printk.h>
@@ -20,8 +23,7 @@ NO_RETURN void idle_entry() {
     if (panic_flag)
       break;
     // if (cpuid() == 0) {
-    arch_with_trap { /*arch_wfi();*/
-    }
+    arch_with_trap { arch_wfi(); }
     // } else {
     //   arch_stop_cpu();
     // }
@@ -31,14 +33,18 @@ NO_RETURN void idle_entry() {
 }
 
 NO_RETURN void kernel_entry() {
-  printk("hello world %d\n", (int)sizeof(struct proc));
-
-  // proc_test();
+  printk("hello world\n");
   // container_test();
   // sd_test();
 
   // do_rest_init();
-  user_proc_test();
+  // proc_test();
+  // vm_test();
+  // user_proc_test();
+  // misalign_test();
+  // do_rest_init();
+  init_filesystem();
+  init_shell();
   while (1)
     yield();
 

@@ -94,6 +94,89 @@ void free_pgdir(struct pgdir *pgdir) {
   free_pt_r(pgdir->pt, 0);
 }
 
+void uvmunmap(struct pgdir *pgdir, u64 va, u64 npages, int do_free) {
+  u64 a;
+  u64 *pte;
+  if (va % PAGE_SIZE) {
+    panic("not aligned");
+  }
+  for (a = va; a < va + npages * PAGE_SIZE; a += PAGE_SIZE) {
+    pte = get_pte(pgdir, a, false);
+    if (!pte)
+      panic("walk");
+    if (!(*pte & PTE_VALID))
+      panic("not mapped");
+    if (PTE_FLAGS(*pte) == PTE_VALID)
+      panic("not a leaf");
+    if (do_free) {
+      u64 pa = P2K(PTE_ADDRESS(*pte));
+      kfree((void *)pa);
+    }
+    *pte = 0;
+  }
+}
+
+int uvm_dealloc(struct pgdir *pgdir, usize oldsz, usize newsz) {
+  /* TODO: Lab9 Shell */
+  if (newsz >= oldsz)
+    return (int)oldsz;
+  if (ROUNDUP(newsz, PAGE_SIZE) < ROUNDUP(oldsz, PAGE_SIZE)) {
+    int npgs = (int)((ROUNDUP(oldsz, PAGE_SIZE) - ROUNDUP(newsz, PAGE_SIZE)) /
+                     PAGE_SIZE);
+    uvmunmap(pgdir, ROUNDUP(newsz, PAGE_SIZE), npgs, 1);
+  }
+  return 0;
+}
+
+int uvm_map(struct pgdir *pgdir, void *va, usize sz, u64 pa) {
+  // printf("uvmmap pgdir:%x| va:%x| pa:%x| sz:%x", pgdir, va, pa, sz);
+  /* TO-DO: Lab2 memory*/
+  u64 a, last;
+  PTEntriesPtr pte;
+  if (!sz)
+    panic("map:sz 0");
+  a = (u64)ROUNDDOWN(va, PAGE_SIZE);
+  last = (u64)ROUNDDOWN((va + sz - 1), PAGE_SIZE);
+  while (true) {
+    if ((pte = get_pte(pgdir, a, 1)) == 0)
+      return -1;
+    if (*pte & PTE_VALID)
+      panic("remap");
+    *pte = pa | PTE_USER_DATA;
+    // printf("!%llx pte:%llx!\n", *pte, pte);
+    if (a == last)
+      break;
+    a += PAGE_SIZE;
+    pa += PAGE_SIZE;
+  }
+  return 0;
+}
+
+int uvm_alloc(struct pgdir *pgdir, usize oldsz, usize newsz) {
+  /* TODO: Lab9 Shell */
+  char *mem;
+  u64 a;
+  if (newsz < oldsz)
+    return oldsz;
+  // if (base + newsz > stksz)
+  //     PANIC("overflow");
+  oldsz = ROUNDUP(oldsz, PAGE_SIZE);
+  for (a = oldsz; a < newsz; a += PAGE_SIZE) {
+    mem = kalloc_page();
+    if (mem == 0) {
+      uvm_dealloc(pgdir, a, oldsz);
+      return 0;
+    }
+    memset(mem, 0, PAGE_SIZE);
+    if (uvm_map(pgdir, (void *)a, PAGE_SIZE, K2P(mem)) != 0) {
+      printk("already map\n");
+      kfree(mem);
+      uvm_dealloc(pgdir, a, oldsz);
+    }
+  }
+  return (int)newsz;
+}
+
 // Given a parent process's page table, copy
 // its memory into a child's page table.
 // Copies both the page table and the
@@ -122,7 +205,7 @@ int uvmcopy(struct pgdir *old, struct pgdir *new, u64 sz) {
       panic("alloc pte fail");
     }
     *pte_p = K2P(mem) | PTE_USER_DATA;
-    // if (mappages(new, i, PGSIZE, (uint64)mem, flags) != 0) {
+    // if (mappages(new, i, PAGE_SIZE, (uint64)mem, flags) != 0) {
     //   kfree(mem);
     //   // goto err;
     // }
@@ -130,7 +213,7 @@ int uvmcopy(struct pgdir *old, struct pgdir *new, u64 sz) {
   return 0;
 
   // err:
-  //   uvmunmap(new, 0, i / PGSIZE, 1);
+  //   uvmunmap(new, 0, i / PAGE_SIZE, 1);
   //   return -1;
 }
 
@@ -166,11 +249,10 @@ void attach_pgdir(struct pgdir *pgdir) {
   _acquire_spinlock(&thisproc()->pgdir.lock);
   thisproc()->pgdir.online = false;
   _release_spinlock(&thisproc()->pgdir.lock);
-
   if (pgdir->pt) {
-    _acquire_spinlock(&pgdir->lock);
+    // _acquire_spinlock(&pgdir->lock);
     pgdir->online = TRUE;
-    _release_spinlock(&thisproc()->pgdir.lock);
+    // _release_spinlock(&thisproc()->pgdir.lock);
     arch_set_ttbr0(K2P(pgdir->pt));
   } else {
     arch_set_ttbr0(K2P(&invalid_pt));

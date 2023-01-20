@@ -1,4 +1,5 @@
 #include "aarch64/mmu.h"
+#include "fs/fs.h"
 #include "kernel/printk.h"
 #include <aarch64/trap.h>
 #include <common/defines.h>
@@ -18,32 +19,38 @@
 extern int fdalloc(struct file *f);
 
 static int loaduvm(struct pgdir *pgdir, u64 va, Inode *ip, u32 offset, u32 sz) {
-  printk("loaduvm:size:%d", sz);
-  u64 n;
-  u64 pa, i;
-  for (i = 0; i < sz; i += PAGE_SIZE) {
-    pa = uva2ka(pgdir, va + i);
+  printk("loaduvm:size:%d\n", sz);
+  int n;
+  u64 pa, va0;
+  while (sz > 0) {
+    va0 = PAGE_BASE(va);
+    pa = (u64)uva2ka(pgdir, va0);
     if (pa == 0)
-      panic("loadseg: address should exist");
-    if (sz - i < PAGE_SIZE)
-      n = sz - i;
-    else
-      n = PAGE_SIZE;
-    if (inodes.read(ip, (u8 *)pa, offset + i, n) != n)
+      panic("addr not exist");
+    n = MIN(PAGE_SIZE - (va - va0), sz);
+    if (inodes.read(ip, (u8 *)pa + (va - va0), offset, (usize)n) != (usize)n)
       return -1;
+    offset += n;
+    sz -= n;
+    va += n;
   }
   return 0;
 }
 
 int execve(const char *path, char *const argv[], char *const envp[]) {
   // TODO
+  printk("in execve\n");
+  // init_filesystem();
   (void)envp;
   OpContext ctx;
   bcache.begin_op(&ctx);
+  printk("path:%s\n", path);
   Inode *ip = namei(path, &ctx);
   if (!ip)
     return -1;
   inodes.lock(ip);
+  printk("ip:%p\n", ip);
+
   Elf64_Ehdr elf;
   struct pgdir *pgdir = &thisproc()->pgdir;
   if (inodes.read(ip, (u8 *)(&elf), 0, sizeof(elf)) < sizeof(elf)) {
@@ -62,23 +69,23 @@ int execve(const char *path, char *const argv[], char *const envp[]) {
       continue;
     if (ph.p_memsz < ph.p_filesz)
       goto bad;
-    // size is fixed to one page
-    // sz = (u64)uvm_alloc(pgdir, 0, 8192, sz, ph.p_vaddr + ph.p_memsz);
-    // FIXME:loaduvm
+    printk("new size:%lld\n", (u64)(ph.p_vaddr + ph.p_memsz));
+    sz = (u64)uvm_alloc(pgdir, sz, ph.p_vaddr + ph.p_memsz);
     if (loaduvm(pgdir, (u64)ph.p_vaddr, ip, (u32)ph.p_offset,
                 (u32)ph.p_filesz) < 0) {
       goto bad;
     }
   }
+  printk("done\n");
   inodes.unlock(ip);
   inodes.put(&ctx, ip);
   bcache.end_op(&ctx);
 
-  // ip = 0;
-  // sz = ROUNDUP(sz, PAGE_SIZE);
-  // sz = (u64)uvm_alloc(pgdir, 0, 8192, sz, sz + (PAGE_SIZE << 1));
-  // if (!sz)
-  //   goto bad;
+  ip = 0;
+  sz = ROUNDUP(sz, PAGE_SIZE);
+  sz = (u64)uvm_alloc(pgdir, sz, sz + (PAGE_SIZE << 1));
+  if (!sz)
+    goto bad;
   // clearpteu(pgdir, (char *)(sz - (PAGE_SIZE << 1)));
 
   u64 sp = sz;
@@ -102,11 +109,8 @@ int execve(const char *path, char *const argv[], char *const envp[]) {
   thisproc()->ucontext->x[0] = (u64)argc;
   if ((argc & 1) == 0)
     sp -= 8;
-
-  u64 auxv[] = {0, AT_PAGESZ, PAGE_SIZE, AT_NULL};
-  sp -= sizeof(auxv);
-  if (copyout(pgdir, (void *)sp, auxv, sizeof(auxv)) < 0)
-    goto bad;
+  // reserve
+  sp -= 8;
 
   sp -= 8;
   u64 tmp = 0;
@@ -128,10 +132,16 @@ int execve(const char *path, char *const argv[], char *const envp[]) {
   thisproc()->ucontext->sp = sp;
   thisproc()->ucontext->elr = elf.e_entry;
   attach_pgdir(pgdir);
+  printk("entry:%p\n", (void *)elf.e_entry);
+  printk("pte:%p\n", (void *)*get_pte(pgdir, elf.e_entry, 0));
   free_pgdir(oldpgdir);
+  arch_tlbi_vmalle1is();
+
   return 0;
 
 bad:
+  printk("bad\n");
+  PANIC();
   if (pgdir)
     free_pgdir(pgdir);
   if (ip) {

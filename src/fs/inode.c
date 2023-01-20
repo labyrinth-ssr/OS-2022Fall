@@ -120,8 +120,12 @@ static void inode_sync(OpContext *ctx, Inode *inode, bool do_write) {
 // Modified
 static Inode *inode_get(usize inode_no) {
   ASSERT(inode_no > 0);
+  printk("sblock:\n");
+
   ASSERT(inode_no < sblock->num_inodes);
+  printk("sblock:%d", sblock->num_inodes);
   ASSERT((wait_sem(&lock)));
+  printk("after\n");
   Inode *ip = NULL;
   ListNode *empty = NULL;
   _for_in_list(p, &head) {
@@ -290,7 +294,7 @@ static usize inode_read(Inode *inode, u8 *dest, usize offset, usize count) {
     cache->release(bp);
   }
 
-  return 0;
+  return count;
 }
 
 // Modified
@@ -335,11 +339,7 @@ static usize inode_lookup(Inode *inode, const char *name, usize *index) {
   DirEntry de;
   usize inum;
   for (usize off = 0; off < entry->num_bytes; off += sizeof(DirEntry)) {
-    if (inode_read(inode, (void *)&de, off, sizeof(DirEntry))) {
-      printk("dir look up fail");
-      PANIC();
-    }
-
+    inode_read(inode, (void *)&de, off, sizeof(DirEntry));
     if (de.inode_no == 0) {
       continue;
     }
@@ -473,7 +473,7 @@ static Inode *namex(const char *path, int nameiparent, char *name,
       inode_unlock(ip);
       return ip;
     }
-    if ((next = (Inode *)inode_lookup(ip, name, 0)) == 0) {
+    if ((next = inode_get(inode_lookup(ip, name, 0))) == 0) {
       inode_unlock(ip);
       return 0;
     }

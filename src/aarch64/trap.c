@@ -32,11 +32,13 @@ void trap_global_handler(UserContext *context) {
   case ESR_EC_IABORT_EL1:
   case ESR_EC_DABORT_EL0:
   case ESR_EC_DABORT_EL1: {
-    if (pgfault(iss) != 0) {
-      printk("Page fault %llu\n", ec);
+    // if (pgfault(iss) != 0) {
+    //   printk("Page fault %llu\n", ec);
 
-      PANIC();
-    }
+    //   PANIC();
+    // }
+    (void)iss;
+    PANIC();
     // whether to delete panic?
   } break;
   default: {
@@ -45,7 +47,7 @@ void trap_global_handler(UserContext *context) {
   }
   }
 
-  // TODO: stop killed process while returning to user space
+  // Modified: stop killed process while returning to user space
   // extern char loop_start[], loop_end[];
   // if (!thisproc()->idle && thisproc()->killed) {
   //   // printk("proc in trap:%d,killed?:%d,user?:%d\n", thisproc()->pid,

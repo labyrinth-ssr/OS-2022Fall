@@ -258,6 +258,9 @@ static void simple_sched(enum procstate new_state) {
   }
   update_this_state(new_state);
   auto next = pick_next();
+  if (next->pid != 1) {
+    // printk("next proc is:%d\n", next->pid);
+  }
   if (!next->idle) {
   }
   update_this_proc(next);
@@ -266,6 +269,7 @@ static void simple_sched(enum procstate new_state) {
 
   if (next != this) {
     attach_pgdir(&next->pgdir);
+    // printk("attach\n");
     next->schinfo.start_time = get_timestamp_ms();
     swtch(next->kcontext, &this->kcontext);
     attach_pgdir(&this->pgdir);
@@ -279,6 +283,9 @@ _sched(enum procstate new_state);
 
 u64 proc_entry(void (*entry)(u64), u64 arg) {
   _release_sched_lock();
+  if (thisproc()->pid == 2) {
+    printk("2\n");
+  }
   set_return_addr(entry);
   return arg;
 }

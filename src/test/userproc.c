@@ -1,4 +1,5 @@
 #include "aarch64/intrinsic.h"
+#include "aarch64/mmu.h"
 #include "common/defines.h"
 #include "kernel/container.h"
 #include <common/rc.h>
@@ -13,6 +14,7 @@
 #include <test/test.h>
 
 PTEntriesPtr get_pte(struct pgdir *pgdir, u64 va, bool alloc);
+extern char icode[], eicode[];
 
 void vm_test() {
   printk("vm_test\n");
@@ -37,6 +39,32 @@ void vm_test() {
     kfree_page(p[i]);
   ASSERT(alloc_page_cnt.count == p0);
   printk("vm_test PASS\n");
+}
+
+void misalign_test() {
+  printk("misalign_test\n");
+  static void *p[100000];
+  (void)p;
+  struct pgdir pg;
+  init_pgdir(&pg);
+  for (u64 q = PAGE_BASE((u64)icode); q < PAGE_BASE((u64)icode) + PAGE_SIZE;
+       q += PAGE_SIZE) {
+    p[1] = (void *)q;
+    *get_pte(&pg, 0x400000 + q - PAGE_BASE((u64)icode), true) =
+        K2P(icode) | PTE_USER_DATA;
+    printk("user:%p,phy:%p,q:%p\n",
+           (void *)(0x400000 + q - PAGE_BASE((u64)icode)),
+           (void *)(K2P(q) | PTE_USER_DATA), (void *)q);
+  }
+  attach_pgdir(&pg);
+  printk(",phy_elr:%p",
+         (void *)(*get_pte(&pg, (u64)(0x400000 + icode - PAGE_BASE((u64)icode)),
+                           false)));
+  free_pgdir(&pg);
+  // attach_pgdir(&pg);
+  // for (u64 i = 0; i < 100000; i++)
+  //   kfree_page(p[i]);
+  printk("misalign_test PASS\n");
 }
 
 void trap_return();
@@ -65,16 +93,23 @@ define_syscall(myreport, u64 id) {
   return 0;
 }
 
-static void _create_user_proc(int i) {
+static void _create_user_proc(int i, u64 start, u64 end) {
   auto p = create_proc();
-  for (u64 q = (u64)loop_start; q < (u64)loop_end; q += PAGE_SIZE) {
-    *get_pte(&p->pgdir, 0x400000 + q - (u64)loop_start, true) =
-        K2P(q) | PTE_USER_DATA;
+  (void)end;
+  for (u64 q = PAGE_BASE(start); q < PAGE_BASE(start) + PAGE_SIZE;
+       q += PAGE_SIZE) {
+    *get_pte(&p->pgdir, 0x400000 + start - PAGE_BASE(start), true) =
+        K2P(start) | PTE_USER_DATA;
+    printk("user:%p,phy:%p,q:%p\n",
+           (void *)(0x400000 + start - PAGE_BASE(start)),
+           (void *)(K2P(start) | PTE_USER_DATA), (void *)q);
   }
   ASSERT(p->pgdir.pt);
   p->ucontext->x[0] = i;
-  p->ucontext->elr = 0x400000;
-  // p->ucontext->ttbr0 = K2P(p->pgdir.pt);
+  p->ucontext->elr = 0x400000 + start - PAGE_BASE(start);
+  printk("elr:%p\n", (void *)p->ucontext->elr);
+  // attach_pgdir(&p->pgdir);
+  // printk("phy:%p\n", (void *)*get_pte(&p->pgdir, p->ucontext->elr, false));
   p->ucontext->spsr = 0;
   pids[i] = p->pid;
   printk("pid[%d]:%d\n", i, p->pid);
@@ -106,7 +141,7 @@ void user_proc_test() {
   memset(cpu_cnt, 0, sizeof(cpu_cnt));
   stop = false;
   for (int i = 0; i < 22; i++)
-    _create_user_proc(i);
+    _create_user_proc(i, (u64)loop_start, (u64)loop_end);
   ASSERT(wait_sem(&myrepot_done));
   printk("done\n");
   for (int i = 0; i < 22; i++)
@@ -127,7 +162,7 @@ static void container_root(int a) {
     create_container(container_root, 3);
   }
   for (int i = a * 4; i < a * 4 + 4; i++)
-    _create_user_proc(i);
+    _create_user_proc(i, (u64)loop_start, (u64)loop_end);
   for (int i = 0; i < 4; i++)
     ASSERT(_wait_user_proc() / 4 == a);
   post_sem(&container_done);
@@ -148,7 +183,7 @@ void container_test() {
   create_container(container_root, 0);
   create_container(container_root, 1);
   for (int i = 16; i < 22; i++)
-    _create_user_proc(i);
+    _create_user_proc(i, (u64)loop_start, (u64)loop_end);
   ASSERT(wait_sem(&myrepot_done));
   printk("done\n");
   for (int i = 0; i < 22; i++) {
@@ -166,4 +201,29 @@ void container_test() {
     printk("Proc %d: %llu\n", i, proc_cnt[i]);
 }
 
-void shell() {}
+void init_shell() {
+  printk("start_loop:%p,end_loop:%p,icode:%p,eicode:%p\n", (void *)loop_start,
+         (void *)loop_end, (void *)icode, (void *)eicode);
+  printk("loop:%lld,code:%lld\n", (u64)(loop_end - loop_start),
+         (u64)(eicode - icode));
+  printk("start_loop:%p,end_loop:%p,icode:%p,eicode:%p\n",
+         (void *)PAGE_BASE((u64)loop_start), (void *)PAGE_BASE((u64)loop_end),
+         (void *)PAGE_BASE((u64)icode), (void *)PAGE_BASE((u64)eicode));
+  init_sem(&myrepot_done, 0);
+  memset(proc_cnt, 0, sizeof(proc_cnt));
+  memset(cpu_cnt, 0, sizeof(cpu_cnt));
+  stop = false;
+  _create_user_proc(0, (u64)icode, (u64)eicode);
+  printk("a\n");
+  ASSERT(wait_sem(&myrepot_done));
+  printk("done\n");
+  // for (int i = 0; i < 22; i++)
+  //   ASSERT(kill(pids[i]) == 0);
+  // for (int i = 0; i < 22; i++)
+  //   _wait_user_proc();
+  printk("init shell PASS\nRuntime:\n");
+  // for (int i = 0; i < 4; i++)
+  //   printk("CPU %d: %llu\n", i, cpu_cnt[i]);
+  // for (int i = 0; i < 22; i++)
+  //   printk("Proc %d: %llu\n", i, proc_cnt[i]);
+}

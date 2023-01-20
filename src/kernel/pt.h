@@ -19,3 +19,4 @@ void attach_pgdir(struct pgdir *pgdir);
 int copyout(struct pgdir *pd, void *va, void *p, usize len);
 int uvmcopy(struct pgdir *old, struct pgdir *new, u64 sz);
 u64 uva2ka(struct pgdir *pgdir, u64 va);
+int uvm_alloc(struct pgdir *pgdir, usize oldsz, usize newsz);

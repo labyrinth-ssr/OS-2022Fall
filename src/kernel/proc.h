@@ -28,6 +28,7 @@ typedef struct KernelContext {
 } KernelContext;
 
 struct proc {
+  u64 sz;
   bool killed;
   bool idle;
   int pid;

@@ -2,6 +2,8 @@
 
 #define RAND_MAX 32768
 
+void misalign_test();
+void init_shell();
 void proc_test();
 void alloc_test();
 void rbtree_test();

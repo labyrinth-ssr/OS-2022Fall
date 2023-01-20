@@ -48,6 +48,8 @@ bool user_writeable(const void *start, usize size) {
 // not readable by the current user process
 usize user_strlen(const char *str, usize maxlen) {
   for (usize i = 0; i < maxlen; i++) {
+    printk("user_readable?%d\n", user_readable(&str[i], 1));
+
     if (user_readable(&str[i], 1)) {
       if (str[i] == 0)
         return i + 1;

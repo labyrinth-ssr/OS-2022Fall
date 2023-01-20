@@ -61,7 +61,6 @@ define_early_init(pages) {
     // init_rc(&page_arr[page2index((void *)p)].ref);
     add_to_queue(&pages, (QueueNode *)p);
   }
-  printk("page list finish\n");
 }
 
 define_init(zero_page) {

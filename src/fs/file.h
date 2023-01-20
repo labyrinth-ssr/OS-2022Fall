@@ -10,7 +10,7 @@
 #include <sys/stat.h>
 
 #define NFILE 65536 // Open files per system
-#define NOFILE 1024 /* open files per process */
+#define NOFILE 8    /* open files per process */
 
 typedef struct file {
   enum { FD_NONE, FD_PIPE, FD_INODE } type;

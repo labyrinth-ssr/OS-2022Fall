@@ -20,12 +20,15 @@ extern BlockDevice block_device;
 
 define_rest_init(paging) {
   // TODO init
-  // init_sections(&thisproc()->pgdir.section_head);
-  // sd_init();
-  // compiler_fence();
-  // arch_fence();
-  // init_block_device();
-  // init_bcache(get_super_block(), &block_device);
+  init_sections(&thisproc()->pgdir.section_head);
+  sd_init();
+  compiler_fence();
+  arch_fence();
+  init_block_device();
+  const SuperBlock *sblock = get_super_block();
+  init_bcache(sblock, &block_device);
+  init_inodes(sblock, &bcache);
+  init_ftable();
 }
 
 void init_sections(ListNode *section_head) {
@@ -197,6 +200,7 @@ int pgfault(u64 iss) {
       continue;
     }
     struct section *section_p = container_of(p, struct section, stnode);
+    printk("section_p:%p", section_p);
     if (section_p->begin <= addr && section_p->end > addr) {
       section = section_p;
       break;
