@@ -140,10 +140,13 @@ int uvm_map(struct pgdir *pgdir, void *va, usize sz, u64 pa) {
   while (true) {
     if ((pte = get_pte(pgdir, a, 1)) == 0)
       return -1;
-    if (*pte & PTE_VALID)
-      panic("remap");
+    if (*pte & PTE_VALID) {
+      printk("vava: %llx", a);
+      panic("remap ");
+    }
     *pte = pa | PTE_USER_DATA;
     // printf("!%llx pte:%llx!\n", *pte, pte);
+    printk("va %llx map pa %llx\n", a, *pte);
     if (a == last)
       break;
     a += PAGE_SIZE;
@@ -153,14 +156,14 @@ int uvm_map(struct pgdir *pgdir, void *va, usize sz, u64 pa) {
 }
 
 int uvm_alloc(struct pgdir *pgdir, usize oldsz, usize newsz) {
-  /* TODO: Lab9 Shell */
   char *mem;
   u64 a;
   if (newsz < oldsz)
     return oldsz;
   // if (base + newsz > stksz)
   //     PANIC("overflow");
-  oldsz = ROUNDUP(oldsz, PAGE_SIZE);
+  // printk("va:%llx,round_va:%llx", va, ROUNDDOWN(va, PAGE_SIZE));
+  oldsz = ROUNDDOWN(oldsz, PAGE_SIZE);
   for (a = oldsz; a < newsz; a += PAGE_SIZE) {
     mem = kalloc_page();
     if (mem == 0) {

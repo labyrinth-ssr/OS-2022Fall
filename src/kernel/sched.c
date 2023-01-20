@@ -258,8 +258,8 @@ static void simple_sched(enum procstate new_state) {
   }
   update_this_state(new_state);
   auto next = pick_next();
-  if (next->pid != 1) {
-    // printk("next proc is:%d\n", next->pid);
+  if (next->pid == 2) {
+    printk("next proc is:%d ", next->pid);
   }
   if (!next->idle) {
   }

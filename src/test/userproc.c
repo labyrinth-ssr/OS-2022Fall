@@ -50,15 +50,15 @@ void misalign_test() {
   for (u64 q = PAGE_BASE((u64)icode); q < PAGE_BASE((u64)icode) + PAGE_SIZE;
        q += PAGE_SIZE) {
     p[1] = (void *)q;
-    *get_pte(&pg, 0x400000 + q - PAGE_BASE((u64)icode), true) =
+    *get_pte(&pg, 0x000000 + q - PAGE_BASE((u64)icode), true) =
         K2P(icode) | PTE_USER_DATA;
     printk("user:%p,phy:%p,q:%p\n",
-           (void *)(0x400000 + q - PAGE_BASE((u64)icode)),
+           (void *)(0x000000 + q - PAGE_BASE((u64)icode)),
            (void *)(K2P(q) | PTE_USER_DATA), (void *)q);
   }
   attach_pgdir(&pg);
   printk(",phy_elr:%p",
-         (void *)(*get_pte(&pg, (u64)(0x400000 + icode - PAGE_BASE((u64)icode)),
+         (void *)(*get_pte(&pg, (u64)(0x00000 + icode - PAGE_BASE((u64)icode)),
                            false)));
   free_pgdir(&pg);
   // attach_pgdir(&pg);
@@ -98,15 +98,12 @@ static void _create_user_proc(int i, u64 start, u64 end) {
   (void)end;
   for (u64 q = PAGE_BASE(start); q < PAGE_BASE(start) + PAGE_SIZE;
        q += PAGE_SIZE) {
-    *get_pte(&p->pgdir, 0x400000 + start - PAGE_BASE(start), true) =
-        K2P(start) | PTE_USER_DATA;
-    printk("user:%p,phy:%p,q:%p\n",
-           (void *)(0x400000 + start - PAGE_BASE(start)),
-           (void *)(K2P(start) | PTE_USER_DATA), (void *)q);
+    *get_pte(&p->pgdir, 0x000000 + q - PAGE_BASE(start), true) =
+        K2P(q) | PTE_USER_DATA;
   }
   ASSERT(p->pgdir.pt);
   p->ucontext->x[0] = i;
-  p->ucontext->elr = 0x400000 + start - PAGE_BASE(start);
+  p->ucontext->elr = 0x000000 + start - PAGE_BASE(start);
   printk("elr:%p\n", (void *)p->ucontext->elr);
   // attach_pgdir(&p->pgdir);
   // printk("phy:%p\n", (void *)*get_pte(&p->pgdir, p->ucontext->elr, false));
