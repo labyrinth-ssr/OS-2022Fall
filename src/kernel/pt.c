@@ -63,7 +63,6 @@ void init_pgdir(struct pgdir *pgdir) {
   init_list_node(&pgdir->section_head);
   init_sections(&pgdir->section_head);
   // pgdir->pt = NULL;
-
   ASSERT(get_pte(pgdir, 0, true));
 }
 
@@ -129,7 +128,6 @@ int uvm_dealloc(struct pgdir *pgdir, usize oldsz, usize newsz) {
 }
 
 int uvm_map(struct pgdir *pgdir, void *va, usize sz, u64 pa) {
-  // printf("uvmmap pgdir:%x| va:%x| pa:%x| sz:%x", pgdir, va, pa, sz);
   /* TO-DO: Lab2 memory*/
   u64 a, last;
   PTEntriesPtr pte;
@@ -141,10 +139,11 @@ int uvm_map(struct pgdir *pgdir, void *va, usize sz, u64 pa) {
     if ((pte = get_pte(pgdir, a, 1)) == 0)
       return -1;
     if (*pte & PTE_VALID) {
-      printk("vava: %llx", a);
-      panic("remap ");
+      printk("va remap: %llx", a);
+      PANIC();
     }
-    *pte = pa | PTE_USER_DATA;
+    *pte = (pa) | PTE_USER_DATA;
+    printk("*pte = %llx ", (pa) | PTE_USER_DATA);
     // printf("!%llx pte:%llx!\n", *pte, pte);
     printk("va %llx map pa %llx\n", a, *pte);
     if (a == last)
@@ -155,6 +154,13 @@ int uvm_map(struct pgdir *pgdir, void *va, usize sz, u64 pa) {
   return 0;
 }
 
+void uvmclear(struct pgdir *pgdir, u64 va) {
+  auto pte = *get_pte(pgdir, va, 0);
+  if (pte == 0)
+    panic("uvmclear");
+  pte &= ~PTE_USER;
+}
+
 int uvm_alloc(struct pgdir *pgdir, usize oldsz, usize newsz) {
   char *mem;
   u64 a;
@@ -162,7 +168,7 @@ int uvm_alloc(struct pgdir *pgdir, usize oldsz, usize newsz) {
     return oldsz;
   // if (base + newsz > stksz)
   //     PANIC("overflow");
-  // printk("va:%llx,round_va:%llx", va, ROUNDDOWN(va, PAGE_SIZE));
+  printk("uvm_alloc:%llx", oldsz);
   oldsz = ROUNDDOWN(oldsz, PAGE_SIZE);
   for (a = oldsz; a < newsz; a += PAGE_SIZE) {
     mem = kalloc_page();
@@ -184,18 +190,26 @@ int uvm_alloc(struct pgdir *pgdir, usize oldsz, usize newsz) {
 // its memory into a child's page table.
 // Copies both the page table and the
 // physical memory.
-// returns 0 on success, -1 on failure.
+// returns 0 on su  ccess, -1 on failure.
 // frees any allocated pages on failure.
 int uvmcopy(struct pgdir *old, struct pgdir *new, u64 sz) {
   PTEntry *pte_p;
   u64 pa, i;
   // u32 flags;
   char *mem;
+
   for (i = 0; i < sz; i += PAGE_SIZE) {
+    printk("upa user:%llx, \n", (u64)get_pte(old, 400000, false));
+    printk("upa user:%llx, \n", *get_pte(old, 400000, false));
     if ((pte_p = get_pte(old, i, false)) == 0)
       panic("uvmcopy: pte should exist");
-    if ((*pte_p & PTE_VALID) == 0)
+    printk("upa:%llx, \n", *pte_p);
+    printk("upa:%llx, \n", (u64)pte_p);
+
+    if ((*pte_p & PTE_VALID) == 0) {
+      printk("invalid upa:%llx\n", *pte_p);
       panic("uvmcopy: page not present");
+    }
     pa = P2K(PTE_ADDRESS(*pte_p));
     // flags = PTE_FLAGS(*pte_p);
     if ((mem = kalloc_page()) == 0)

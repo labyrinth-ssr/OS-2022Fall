@@ -1,6 +1,8 @@
 #include "aarch64/intrinsic.h"
 #include "aarch64/mmu.h"
 #include "common/defines.h"
+#include "fs/cache.h"
+#include "fs/inode.h"
 #include "kernel/container.h"
 #include <common/rc.h>
 #include <common/sem.h>
@@ -41,32 +43,6 @@ void vm_test() {
   printk("vm_test PASS\n");
 }
 
-void misalign_test() {
-  printk("misalign_test\n");
-  static void *p[100000];
-  (void)p;
-  struct pgdir pg;
-  init_pgdir(&pg);
-  for (u64 q = PAGE_BASE((u64)icode); q < PAGE_BASE((u64)icode) + PAGE_SIZE;
-       q += PAGE_SIZE) {
-    p[1] = (void *)q;
-    *get_pte(&pg, 0x000000 + q - PAGE_BASE((u64)icode), true) =
-        K2P(icode) | PTE_USER_DATA;
-    printk("user:%p,phy:%p,q:%p\n",
-           (void *)(0x000000 + q - PAGE_BASE((u64)icode)),
-           (void *)(K2P(q) | PTE_USER_DATA), (void *)q);
-  }
-  attach_pgdir(&pg);
-  printk(",phy_elr:%p",
-         (void *)(*get_pte(&pg, (u64)(0x00000 + icode - PAGE_BASE((u64)icode)),
-                           false)));
-  free_pgdir(&pg);
-  // attach_pgdir(&pg);
-  // for (u64 i = 0; i < 100000; i++)
-  //   kfree_page(p[i]);
-  printk("misalign_test PASS\n");
-}
-
 void trap_return();
 
 static bool stop;
@@ -99,15 +75,16 @@ static void _create_user_proc(int i, u64 start, u64 end) {
   for (u64 q = PAGE_BASE(start); q < PAGE_BASE(start) + PAGE_SIZE;
        q += PAGE_SIZE) {
     *get_pte(&p->pgdir, 0x000000 + q - PAGE_BASE(start), true) =
-        K2P(q) | PTE_USER_DATA;
+        K2P(q) | PTE_USER_DATA | PTE_VALID;
   }
   ASSERT(p->pgdir.pt);
   p->ucontext->x[0] = i;
   p->ucontext->elr = 0x000000 + start - PAGE_BASE(start);
-  printk("elr:%p\n", (void *)p->ucontext->elr);
-  // attach_pgdir(&p->pgdir);
-  // printk("phy:%p\n", (void *)*get_pte(&p->pgdir, p->ucontext->elr, false));
   p->ucontext->spsr = 0;
+  OpContext ctx;
+  bcache.begin_op(&ctx);
+  p->cwd = namei("/", &ctx);
+  bcache.end_op(&ctx);
   pids[i] = p->pid;
   printk("pid[%d]:%d\n", i, p->pid);
   set_parent_to_this(p);
@@ -199,13 +176,6 @@ void container_test() {
 }
 
 void init_shell() {
-  printk("start_loop:%p,end_loop:%p,icode:%p,eicode:%p\n", (void *)loop_start,
-         (void *)loop_end, (void *)icode, (void *)eicode);
-  printk("loop:%lld,code:%lld\n", (u64)(loop_end - loop_start),
-         (u64)(eicode - icode));
-  printk("start_loop:%p,end_loop:%p,icode:%p,eicode:%p\n",
-         (void *)PAGE_BASE((u64)loop_start), (void *)PAGE_BASE((u64)loop_end),
-         (void *)PAGE_BASE((u64)icode), (void *)PAGE_BASE((u64)eicode));
   init_sem(&myrepot_done, 0);
   memset(proc_cnt, 0, sizeof(proc_cnt));
   memset(cpu_cnt, 0, sizeof(cpu_cnt));

@@ -69,6 +69,8 @@ define_init(zero_page) {
   // memset(zero_page, 0, PAGE_SIZE);
   // _increment_rc(&zero_page_cnt);
   // _increment_rc(&alloc_page_cnt);
+  printk("pyh begin:%llx,end:%llx,kernel begin:%llx,end:%x",
+         PAGE_BASE((u64)&end) + PAGE_SIZE, P2K(PHYSTOP), (u64)end, PHYSTOP);
 }
 
 // Allocate: fetch a page from the queue of usable pages.

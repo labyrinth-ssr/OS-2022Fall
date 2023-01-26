@@ -27,7 +27,7 @@ void printk(const char *fmt, ...) {
   va_end(arg);
 }
 
-void panic(char *info) {
-  printk("%s\n", info);
-  PANIC();
-}
+// void panic(char *info) {
+//   printk("%s\n", info);
+//   PANIC();
+// }

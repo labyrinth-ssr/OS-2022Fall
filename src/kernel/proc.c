@@ -3,6 +3,7 @@
 #include "common/defines.h"
 #include "common/sem.h"
 #include "common/spinlock.h"
+#include "fs/cache.h"
 #include "fs/inode.h"
 #include "kernel/pt.h"
 #include <common/list.h>
@@ -54,8 +55,23 @@ NO_RETURN void exit(int code) {
   // 5. sched(ZOMBIE)
   // NOTE: be careful of concurrency
   setup_checker(0);
-  _acquire_spinlock(&plock);
   auto this = thisproc();
+
+  for (int fd = 0; fd < NOFILE; fd++) {
+    if (this->oftable.ofile[fd]) {
+      struct file *f = this->oftable.ofile[fd];
+      fileclose(f);
+      this->oftable.ofile[fd] = 0;
+    }
+  }
+
+  OpContext ctx;
+  bcache.begin_op(&ctx);
+  inodes.put(&ctx, this->cwd);
+  bcache.end_op(&ctx);
+  this->cwd = 0;
+
+  _acquire_spinlock(&plock);
   // printk("%d exit\n", this->pid);
   ASSERT(this != this->container->rootproc && !this->idle);
 
@@ -272,6 +288,7 @@ struct proc *get_offline_proc() {
  */
 void trap_return();
 int fork() { /* TODO: Your code here. */
+  printk("fork: user proc id:%d\n", thisproc()->pid);
   int i, pid;
   struct proc *np;
   struct proc *p = thisproc();
@@ -282,7 +299,7 @@ int fork() { /* TODO: Your code here. */
   }
   _acquire_spinlock(&plock);
   // Copy user memory from parent to child.
-  uvmcopy(&p->pgdir, &np->pgdir, PAGE_SIZE);
+  uvmcopy(&p->pgdir, &np->pgdir, p->sz);
   // if (uvmcopy(p->pagetable, np->pagetable, p->sz) < 0) {
   //   freeproc(np);
   //   release(&np->lock);

@@ -16,9 +16,10 @@ void syscall_entry(UserContext *context) {
 
   // for (u64* p = (u64*)&early_init; p < (u64*)&rest_init; p++)
   // ((void(*)())*p)();
-  // printk("in syscall\n");
   u64 id = context->x[8], ret = 0;
-  if (id < NR_SYSCALL) {
+  printk("in syscall,id:%lld\n", id);
+
+  if (id < NR_SYSCALL && syscall_table[id] != NULL) {
     auto function_ptr = (u64 *)syscall_table[id];
     ret = ((u64(*)(u64, u64, u64, u64, u64, u64))function_ptr)(
         context->x[0], context->x[1], context->x[2], context->x[3],
@@ -48,8 +49,6 @@ bool user_writeable(const void *start, usize size) {
 // not readable by the current user process
 usize user_strlen(const char *str, usize maxlen) {
   for (usize i = 0; i < maxlen; i++) {
-    printk("user_readable?%d\n", user_readable(&str[i], 1));
-
     if (user_readable(&str[i], 1)) {
       if (str[i] == 0)
         return i + 1;

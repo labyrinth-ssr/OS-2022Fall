@@ -1,3 +1,4 @@
+#include "aarch64/intrinsic.h"
 #include "aarch64/mmu.h"
 #include "fs/fs.h"
 #include "kernel/printk.h"
@@ -42,8 +43,7 @@ static int loaduvm(struct pgdir *pgdir, u64 va, Inode *ip, u32 offset, u32 sz) {
 int execve(const char *path, char *const argv[], char *const envp[]) {
   // TODO
   printk("in execve\n");
-  u64 argc, sz = 0, sp;
-  int ustack[32];
+  u64 argc, sz = 0, sp, ustack[7], stackbase;
 
   // init_filesystem();
   (void)envp;
@@ -57,15 +57,17 @@ int execve(const char *path, char *const argv[], char *const envp[]) {
   printk("ip:%p\n", ip);
 
   Elf64_Ehdr elf;
-  struct pgdir *pgdir = &thisproc()->pgdir;
+  struct proc *p = thisproc();
+  struct pgdir *pgdir = kalloc(sizeof(struct pgdir));
+  init_pgdir(pgdir);
+
+  // &thisproc()->pgdir;
   if (inodes.read(ip, (u8 *)(&elf), 0, sizeof(elf)) < sizeof(elf)) {
     goto bad;
   }
   if (strncmp((const char *)elf.e_ident, ELFMAG, 4)) {
     panic("bad magic");
   }
-
-  init_pgdir(pgdir);
 
   Elf64_Phdr ph;
   printk("elf.e_phoff:%lld,elf.e_phnum:%lld\n", (u64)elf.e_phoff,
@@ -91,23 +93,28 @@ int execve(const char *path, char *const argv[], char *const envp[]) {
   inodes.unlock(ip);
   inodes.put(&ctx, ip);
   bcache.end_op(&ctx);
-
   ip = 0;
+
+  p = thisproc();
   sz = ROUNDUP(sz, PAGE_SIZE) + PAGE_SIZE;
-  printk("sz:%llx\n", sz);
-  sz = (u64)uvm_alloc(pgdir, sz, sz + (PAGE_SIZE << 1));
-  if (!sz)
+  u64 sz1;
+  if ((sz1 = uvm_alloc(pgdir, sz, sz + 2 * PAGE_SIZE)) == 0)
     goto bad;
   // clearpteu(pgdir, (char *)(sz - (PAGE_SIZE << 1)));
+  sz = sz1;
+  uvmclear(pgdir, sz - 2 * PAGE_SIZE);
   sp = sz;
+  stackbase = sp - PAGE_SIZE;
+
   argc = 0;
-  printk("sp:%llx", sp);
   if (argv) {
     for (; argv[argc]; argc++) {
-      if (argc > 32)
+      if (argc > 6)
         goto bad;
       sp -= strlen(argv[argc]) + 1;
       sp = ROUNDDOWN(sp, 16);
+      if (sp < stackbase)
+        goto bad;
       if (copyout(pgdir, (void *)sp, argv[argc], strlen(argv[argc]) + 1) < 0) {
         goto bad;
       }
@@ -116,42 +123,43 @@ int execve(const char *path, char *const argv[], char *const envp[]) {
   }
   ustack[argc] = 0;
 
-  thisproc()->ucontext->x[0] = (u64)argc;
-  // if ((argc & 1) == 0)
-  //   sp -= 8;
-
-  // sp -= 8;
-  // u64 tmp = 0;
-  // if (copyout(pgdir, (void *)sp, &tmp, 8) < 0)
-  //   goto bad;
-
-  sp = sp - (u64)(argc + 1) * 8;
-  thisproc()->ucontext->x[1] = sp;
-  if (copyout(pgdir, (void *)sp, ustack, ((u64)argc + 1) * 8) < 0)
+  sp -= (argc + 1) * sizeof(u64);
+  sp -= sp % 16;
+  if (sp < stackbase)
+    goto bad;
+  if (copyout(pgdir, (void *)sp, (char *)ustack, (argc + 1) * sizeof(u64)) < 0)
     goto bad;
 
+  p->ucontext->x[0] = (u64)argc;
+  p->ucontext->x[1] = sp;
+
+  sp -= 8;
+  u64 tmp = 0;
+  if (copyout(pgdir, (void *)sp, &tmp, 8) < 0)
+    goto bad;
   sp -= 8;
   if (copyout(pgdir, (void *)sp, &argc, 8) < 0)
     goto bad;
 
-  // struct pgdir *oldpgdir = &thisproc()->pgdir;
-  // strncpy(thisproc()->name, path, strlen(path) + 1);
-  // thisproc()->sz = sz;
-  thisproc()->ucontext->sp = sp;
-  thisproc()->ucontext->elr = elf.e_entry;
-  *get_pte(pgdir, elf.e_entry, 0) = P2K(*get_pte(pgdir, elf.e_entry, 0) +
-                                        elf.e_entry - PAGE_BASE(elf.e_entry)) |
-                                    PTE_USER_DATA;
-  attach_pgdir(pgdir);
+  // struct pgdir *oldpgdir = &p->pgdir;
+  // strncpy(p->name, path, strlen(path) + 1);
+  // p->sz = sz;
+  printk("%p", p->pgdir.pt);
+  auto old_pt = p->pgdir.pt;
+  p->pgdir.pt = pgdir->pt;
+  kfree_page(old_pt);
+  p->ucontext->sp = sp;
+  p->ucontext->elr = elf.e_entry;
+  p->sz = sz;
+
+  attach_pgdir(&p->pgdir);
+  arch_tlbi_vmalle1is();
+
   printk("entry:%p\n", (void *)elf.e_entry);
   printk("pte:%llx\n", *get_pte(pgdir, elf.e_entry, 0));
   printk("data:%x\n", *(int *)(0x40014c));
-  printk("data2:%x\n", *(int *)(0x40014c + 8));
-  printk("valid? %lld\n",
-         *(u64 *)get_pte(pgdir, elf.e_entry, 0) & PTE_VALID & PTE_USER_DATA);
-
   // free_pgdir(oldpgdir);
-  arch_tlbi_vmalle1is();
+  // 0x407000
 
   return 0;
 

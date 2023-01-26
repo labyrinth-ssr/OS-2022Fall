@@ -258,9 +258,6 @@ static void simple_sched(enum procstate new_state) {
   }
   update_this_state(new_state);
   auto next = pick_next();
-  if (next->pid == 2) {
-    printk("next proc is:%d ", next->pid);
-  }
   if (!next->idle) {
   }
   update_this_proc(next);
@@ -283,9 +280,6 @@ _sched(enum procstate new_state);
 
 u64 proc_entry(void (*entry)(u64), u64 arg) {
   _release_sched_lock();
-  if (thisproc()->pid == 2) {
-    printk("2\n");
-  }
   set_return_addr(entry);
   return arg;
 }

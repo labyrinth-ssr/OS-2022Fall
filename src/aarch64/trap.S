@@ -20,12 +20,12 @@ pushp(x5,x6)
 pushp(x3,x4)
 pushp(x1,x2)
 mrs x1, tpidr_el0
-pushp (x1,x0)
+pushp(x1,x0)
 mrs x0, spsr_el1
 mrs x1, elr_el1
 pushp(x0,x1)
 mrs x0, sp_el0
-pushp (lr,x0)
+pushp(lr,x0)
 
 mov x0, sp
 bl trap_global_handler
