@@ -119,10 +119,7 @@ static void inode_sync(OpContext *ctx, Inode *inode, bool do_write) {
 // 新alloc的entry或empty的entry没有对应inode_no
 // Modified
 static Inode *inode_get(usize inode_no) {
-  printk("inode_no:%lld", inode_no);
   ASSERT(inode_no > 0);
-  printk("sblock:\n");
-
   ASSERT(inode_no < sblock->num_inodes);
   ASSERT((wait_sem(&lock)));
   Inode *ip = NULL;
@@ -440,6 +437,7 @@ static const char *skipelem(const char *path, char *name) {
   }
   while (*path == '/')
     path++;
+  // printk("skip path:%s", path);
   return path;
 }
 
@@ -472,6 +470,8 @@ static Inode *namex(const char *path, int nameiparent, char *name,
       inode_unlock(ip);
       return ip;
     }
+    // auto
+    // printk("cwd:%lld name:%s\n", thisproc()->cwd->inode_no, name);
     if (inode_lookup(ip, name, 0) == 0 ||
         (next = inode_get(inode_lookup(ip, name, 0))) == 0) {
       inode_unlock(ip);

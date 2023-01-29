@@ -37,7 +37,7 @@ void trap_global_handler(UserContext *context) {
 
     //   PANIC();
     // }
-    printk("ec:%llx,iss:%llx\n", ec, iss);
+    printk("ec:%llx,iss:%llx,elr:%llx\n", ec, iss, context->elr);
     (void)iss;
     PANIC();
     // whether to delete panic?

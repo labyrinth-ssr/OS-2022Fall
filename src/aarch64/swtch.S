@@ -11,7 +11,7 @@ swtch:
  # Save old callee-saved registers
  # x29:ebp 
  # put x1 x0 on the top
-   pushp (x28,x29) 
+   pushp (x28,x29)
    pushp (x26,x27)
    pushp (x24,x25)
    pushp (x22,x23)

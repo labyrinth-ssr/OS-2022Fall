@@ -181,7 +181,6 @@ void init_shell() {
   memset(cpu_cnt, 0, sizeof(cpu_cnt));
   stop = false;
   _create_user_proc(0, (u64)icode, (u64)eicode);
-  printk("a\n");
   ASSERT(wait_sem(&myrepot_done));
   printk("done\n");
   // for (int i = 0; i < 22; i++)

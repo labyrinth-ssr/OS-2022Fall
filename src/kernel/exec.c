@@ -1,176 +1,197 @@
-#include "aarch64/intrinsic.h"
-#include "aarch64/mmu.h"
-#include "fs/fs.h"
-#include "kernel/printk.h"
-#include <aarch64/trap.h>
-#include <common/defines.h>
-#include <common/string.h>
 #include <elf.h>
-#include <fs/file.h>
-#include <fs/inode.h>
+#include <common/string.h>
+#include <common/defines.h>
 #include <kernel/console.h>
-#include <kernel/mem.h>
-#include <kernel/paging.h>
 #include <kernel/proc.h>
-#include <kernel/pt.h>
 #include <kernel/sched.h>
 #include <kernel/syscall.h>
+#include <kernel/pt.h>
+#include <kernel/mem.h>
+#include <kernel/paging.h>
+#include <aarch64/trap.h>
+#include <fs/file.h>
+#include <fs/inode.h>
+#include <kernel/printk.h>
 
-// static u64 auxv[][2] = {{AT_PAGESZ, PAGE_SIZE}};
-extern int fdalloc(struct file *f);
-
-static int loaduvm(struct pgdir *pgdir, u64 va, Inode *ip, u32 offset, u32 sz) {
-  printk("loaduvm:size:%d\n", sz);
-  int n;
-  u64 pa, va0;
-  while (sz > 0) {
-    va0 = PAGE_BASE(va);
-    pa = (u64)uva2ka(pgdir, va0);
-    if (pa == 0)
-      panic("addr not exist");
-    n = MIN(PAGE_SIZE - (va - va0), sz);
-    printk("inode read:dest:%p,offset:%llx,size:%d", (u8 *)(pa + (va - va0)),
-           (u64)offset, n);
-    if (inodes.read(ip, (u8 *)(pa + (va - va0)), offset, (usize)n) != (usize)n)
-      return -1;
-    offset += n;
-    sz -= n;
-    va += n;
-  }
-  return 0;
-}
+//static u64 auxv[][2] = {{AT_PAGESZ, PAGE_SIZE}};
+extern int fdalloc(struct file* f);
 
 int execve(const char *path, char *const argv[], char *const envp[]) {
-  // TODO
-  printk("in execve\n");
-  u64 argc, sz = 0, sp, ustack[7], stackbase;
+	// TODO
+	auto this = thisproc();
+	struct pgdir pgdir = {0};
+	// open file
+	OpContext ctx;
+	bcache.begin_op(&ctx);
+	Inode* ip = namei(path, &ctx);
+	if (ip == NULL) {
+		goto bad;
+	}
 
-  // init_filesystem();
-  (void)envp;
-  OpContext ctx;
-  bcache.begin_op(&ctx);
-  printk("path:%s\n", path);
-  Inode *ip = namei(path, &ctx);
-  if (!ip)
-    return -1;
-  inodes.lock(ip);
-  printk("ip:%p\n", ip);
+	// Step1: read header
+	inodes.lock(ip);
+	Elf64_Ehdr header;
+	if (inodes.read(ip, (u8*)(&header), 0, sizeof(Elf64_Ehdr)) < sizeof(Elf64_Ehdr)) {
+		goto bad;
+	}
+	if (strncmp((const char*)header.e_ident, ELFMAG, strlen(ELFMAG)) != 0) {
+		// check magic number
+		goto bad;
+	}
 
-  Elf64_Ehdr elf;
-  struct proc *p = thisproc();
-  struct pgdir *pgdir = kalloc(sizeof(struct pgdir));
-  init_pgdir(pgdir);
+	// Step2: read program header
+	Elf64_Phdr p_header;
+	init_pgdir(&pgdir);
+	u64 sp = 0;
+	for (Elf64_Half i = 0, offset = header.e_phoff; i < header.e_phnum; offset += sizeof(Elf64_Phdr), ++i) {
+		if (inodes.read(ip, (u8*)(&p_header), offset, sizeof(Elf64_Phdr)) < sizeof(Elf64_Phdr)) {
+			goto bad;
+		}
+		if (p_header.p_type == PT_LOAD) { // load and create a section
+			// set something
+			struct section* st = kalloc(sizeof(struct section));
+			memset(st, 0, sizeof(struct section));
+			if (p_header.p_flags == (PF_R | PF_X)) {
+				st->flags = (ST_FILE | ST_RO);
+			} else if (p_header.p_flags == (PF_R | PF_W)) {
+				st->flags = (ST_FILE);
+			} else {
+				kfree(st);
+				continue;
+			}
+			init_sleeplock(&(st->sleeplock));
+			st->begin = p_header.p_vaddr;
+			st->end = p_header.p_vaddr + p_header.p_memsz;
+			sp = MAX(sp, st->end);
+			init_list_node(&(st->stnode));
+			_insert_into_list(&(pgdir.section_head), &(st->stnode));
 
-  // &thisproc()->pgdir;
-  if (inodes.read(ip, (u8 *)(&elf), 0, sizeof(elf)) < sizeof(elf)) {
-    goto bad;
-  }
-  if (strncmp((const char *)elf.e_ident, ELFMAG, 4)) {
-    panic("bad magic");
-  }
+			// load 
+			u64 va = p_header.p_vaddr, va_end = p_header.p_vaddr + p_header.p_filesz;
+			while (va < va_end) {
+				void* ka = kalloc_page();
+				memset(ka, 0, PAGE_SIZE);
+				u64 count = MIN(va_end - va, (u64)PAGE_SIZE - (va - PAGE_BASE(va)));
+				// printk("%llx, %llx\n", va, count);
+				if (inodes.read(ip, (u8*)((u64)ka + (va - PAGE_BASE(va))), p_header.p_offset + (va - p_header.p_vaddr), count) < count) {
+					goto bad;
+				}
+				// printk("%lld\n", *(u64*)(ka + 0x300));
+				vmmap(&pgdir, PAGE_BASE(va), ka, (st->flags & ST_RO) ? PTE_USER_DATA | PTE_RO : PTE_USER_DATA);
+				va += count;
+			}
+			// filesz ~ memsz is BSS section
+			// COW
+			if (va % PAGE_SIZE) {
+				va = PAGE_BASE(va) + PAGE_SIZE;
+			}
+			for (; va < p_header.p_vaddr + p_header.p_memsz; va += PAGE_SIZE) {
+				vmmap(&pgdir, va, get_zero_page(), PTE_USER_DATA);
+			}
+		} else {
+			continue;
+		}
+	}
+	inodes.unlock(ip);
+	inodes.put(&ctx, ip);
+	bcache.end_op(&ctx);
 
-  Elf64_Phdr ph;
-  printk("elf.e_phoff:%lld,elf.e_phnum:%lld\n", (u64)elf.e_phoff,
-         (u64)elf.e_phnum);
-  for (u64 i = 0, off = elf.e_phoff; i < elf.e_phnum; i++, off += sizeof(ph)) {
-    if ((inodes.read(ip, (u8 *)&ph, off, sizeof(ph)) != sizeof(ph)))
-      goto bad;
-    sz = ph.p_vaddr;
-    if (ph.p_type != PT_LOAD)
-      continue;
-    if (ph.p_memsz < ph.p_filesz)
-      goto bad;
-    printk("vaddr:%llx\n", (u64)ph.p_vaddr);
-    printk("sz:%llx\n", (u64)ph.p_memsz);
-    sz = (u64)uvm_alloc(pgdir, sz, sz + ph.p_memsz);
-    printk("offset:%llx", (u64)ph.p_offset);
-    if (loaduvm(pgdir, (u64)ph.p_vaddr, ip, (u32)ph.p_offset,
-                (u32)ph.p_filesz) < 0) {
-      goto bad;
-    }
-  }
-  printk("done\n");
-  inodes.unlock(ip);
-  inodes.put(&ctx, ip);
-  bcache.end_op(&ctx);
-  ip = 0;
+	// Step3: Allocate and initialize user stack.
+	// init section
+	sp = PAGE_BASE(sp) + PAGE_SIZE;
+	u64 sp_top = sp + STACK_SIZE;
+	struct section* st = kalloc(sizeof(struct section));
+	memset(st, 0, sizeof(struct section));
+	st->flags = ST_STACK;
+	init_sleeplock(&(st->sleeplock));
+	st->begin = sp;
+	st->end = sp_top;
+	init_list_node(&(st->stnode));
+	_insert_into_list(&(pgdir.section_head), &(st->stnode));
+	// vmmap
+	for (; sp < sp_top; sp += PAGE_SIZE) {
+		void* ka = kalloc_page();
+		memset(ka, 0, PAGE_SIZE);
+		vmmap(&pgdir, sp, ka, PTE_USER_DATA);
+	}
 
-  p = thisproc();
-  sz = ROUNDUP(sz, PAGE_SIZE) + PAGE_SIZE;
-  u64 sz1;
-  if ((sz1 = uvm_alloc(pgdir, sz, sz + 2 * PAGE_SIZE)) == 0)
-    goto bad;
-  // clearpteu(pgdir, (char *)(sz - (PAGE_SIZE << 1)));
-  sz = sz1;
-  uvmclear(pgdir, sz - 2 * PAGE_SIZE);
-  sp = sz;
-  stackbase = sp - PAGE_SIZE;
+	// left some space
+	sp -= 128;
+	
+	// push envp
+	int envc = 0;
+	char* new_envp[32] = {0};
+	if (envp) {
+		for (; envp[envc]; envc++) {
 
-  argc = 0;
-  if (argv) {
-    for (; argv[argc]; argc++) {
-      if (argc > 6)
-        goto bad;
-      sp -= strlen(argv[argc]) + 1;
-      sp = ROUNDDOWN(sp, 16);
-      if (sp < stackbase)
-        goto bad;
-      if (copyout(pgdir, (void *)sp, argv[argc], strlen(argv[argc]) + 1) < 0) {
-        goto bad;
-      }
-      ustack[argc] = sp;
-    }
-  }
-  ustack[argc] = 0;
+		}
+		for (int i = envc - 1; i >= 0; --i) {
+			sp -= strlen(envp[i]) + 1;
+			// sp = sp & (~15);
+			ASSERT(copyout(&pgdir, (void*)sp, envp[i], strlen(envp[i]) + 1) == 0);
+			new_envp[i] = (char*)sp;
+		}
+	}
 
-  sp -= (argc + 1) * sizeof(u64);
-  sp -= sp % 16;
-  if (sp < stackbase)
-    goto bad;
-  if (copyout(pgdir, (void *)sp, (char *)ustack, (argc + 1) * sizeof(u64)) < 0)
-    goto bad;
+	// push argv
+	sp -= 16;
+	int argc = 0;
+	char* argp[32] = {0};
+	if (argv) {
+		for (; argv[argc]; argc++) {
 
-  p->ucontext->x[0] = (u64)argc;
-  p->ucontext->x[1] = sp;
+		}
+		for (int i = argc - 1; i >= 0; --i) {
+			sp -= strlen(argv[i]) + 1;
+			// sp = sp & (~15);
+			ASSERT(copyout(&pgdir, (void*)sp, argv[i], strlen(argv[i]) + 1) == 0);
+			argp[i] = (char*)sp;
+		}
+	}
+	
+	sp = sp & (~15);
+	// push argv's addr and envp's addr 
+	sp -= (envc + 1) * sizeof(char*);
+	ASSERT(copyout(&pgdir, (void*)sp, &new_envp, (envc + 1) * sizeof(char*)) == 0);
+	sp -= (argc + 1) * sizeof(char*);
+	ASSERT(copyout(&pgdir, (void*)sp, &argp, (argc + 1) * sizeof(char*)) == 0);
 
-  sp -= 8;
-  u64 tmp = 0;
-  if (copyout(pgdir, (void *)sp, &tmp, 8) < 0)
-    goto bad;
-  sp -= 8;
-  if (copyout(pgdir, (void *)sp, &argc, 8) < 0)
-    goto bad;
+	// push argc
+	sp -= 8;
+	ASSERT(copyout(&pgdir, (void*)sp, &argc, sizeof(int)) == 0);
 
-  // struct pgdir *oldpgdir = &p->pgdir;
-  // strncpy(p->name, path, strlen(path) + 1);
-  // p->sz = sz;
-  printk("%p", p->pgdir.pt);
-  auto old_pt = p->pgdir.pt;
-  p->pgdir.pt = pgdir->pt;
-  kfree_page(old_pt);
-  p->ucontext->sp = sp;
-  p->ucontext->elr = elf.e_entry;
-  p->sz = sz;
+	// set trapframe
+	this->ucontext->sp = sp;
+	this->ucontext->elr = header.e_entry;
+	
+	// change pgdir
+	free_pgdir(&(this->pgdir));
+	this->pgdir = pgdir;
+	init_list_node(&(this->pgdir.section_head));
+	_insert_into_list(&(pgdir.section_head), &(this->pgdir.section_head));
+	_detach_from_list(&(pgdir.section_head));
+	attach_pgdir(&(this->pgdir));
+	
+	// auto st_node = this->pgdir.section_head.next;
+	// while (st_node != &(this->pgdir.section_head)) {
+	// 	auto section = container_of(st_node, struct section, stnode);
+	// 	printk("%llx, %llx\n", section->begin, section->end);
+	// 	st_node = st_node->next;
+	// }
 
-  attach_pgdir(&p->pgdir);
-  arch_tlbi_vmalle1is();
-
-  printk("entry:%p\n", (void *)elf.e_entry);
-  printk("pte:%llx\n", *get_pte(pgdir, elf.e_entry, 0));
-  printk("data:%x\n", *(int *)(0x40014c));
-  // free_pgdir(oldpgdir);
-  // 0x407000
-
-  return 0;
+	return 0;
 
 bad:
-  printk("bad\n");
-  PANIC();
-  if (pgdir)
-    free_pgdir(pgdir);
-  if (ip) {
-    inodes.unlock(ip);
-    inodes.put(&ctx, ip);
-  }
-  return -1;
+	printk("ERROR ELF!!!\n");
+	if (pgdir.pt != NULL) {
+        free_pgdir(&pgdir);
+	}
+    if (ip != NULL) {
+        inodes.unlock(ip);
+        inodes.put(&ctx, ip);
+	}
+	bcache.end_op(&ctx);
+	i64 xxx = (i64)envp;
+	xxx = -1;
+	return xxx;
 }
