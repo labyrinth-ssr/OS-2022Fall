@@ -20,22 +20,22 @@ int main() {
   dup(0); // stdout
   dup(0); // stderr
 
-  // while (1) {
-  printf("init: starting sh\n");
-  pid = fork();
-  if (pid < 0) {
-    printf("init: fork failed\n");
-    exit(1);
+  while (1) {
+    printf("init: starting sh\n");
+    pid = fork();
+    if (pid < 0) {
+      printf("init: fork failed\n");
+      exit(1);
+    }
+    if (pid == 0) {
+      execve("sh", argv, envp);
+      printf("init: exec sh failed\n");
+      exit(1);
+    }
+    wpid = wait(NULL);
+    while ((wpid = wait(NULL)) >= 0 && wpid != pid)
+      printf("zombie!\n");
   }
-  if (pid == 0) {
-    execve("sh", argv, envp);
-    printf("init: exec sh failed\n");
-    exit(1);
-  }
-  wpid = wait(NULL);
-  while ((wpid = wait(NULL)) >= 0 && wpid != pid)
-    printf("zombie!\n");
-  // }
 
   return 0;
 }

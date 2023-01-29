@@ -1,258 +1,268 @@
-#include <kernel/proc.h>
+#include "common/checker.h"
+#include "common/spinlock.h"
+#include "driver/sd.h"
 #include <aarch64/mmu.h>
-#include <fs/block_device.h>
-#include <fs/cache.h> 
-#include <kernel/paging.h>
 #include <common/defines.h>
-#include <kernel/pt.h>
-#include <common/sem.h>
 #include <common/list.h>
-#include <kernel/mem.h>
-#include <kernel/sched.h>
+#include <common/sem.h>
 #include <common/string.h>
-#include <kernel/printk.h>
+#include <fs/block_device.h>
+#include <fs/cache.h>
 #include <kernel/init.h>
+#include <kernel/mem.h>
+#include <kernel/paging.h>
+#include <kernel/printk.h>
+#include <kernel/proc.h>
+#include <kernel/pt.h>
+#include <kernel/sched.h>
 
-// define_rest_init(paging) {
-// 	//TODO init
-// 	init_block_device();
-// 	init_bcache(get_super_block(), &block_device);
-// }
+extern BlockDevice block_device;
 
-static struct section* create_heap(ListNode* section_head, u64 begin) {
-	struct section* heap = (struct section*)kalloc(sizeof(struct section));
-	heap->flags = ST_HEAP;
-	init_sleeplock(&(heap->sleeplock));
-	heap->begin = begin;
-	heap->end = heap->begin;
-	init_list_node(&(heap->stnode));
-	_insert_into_list(section_head, &(heap->stnode));
-	return heap;
+define_rest_init(paging) {
+  // TODO init
+  init_sections(&thisproc()->pgdir.section_head);
+  sd_init();
+  compiler_fence();
+  arch_fence();
+  init_block_device();
+  const SuperBlock *sblock = get_super_block();
+  init_bcache(sblock, &block_device);
+  init_inodes(sblock, &bcache);
+  init_ftable();
+}
+
+void init_sections(ListNode *section_head) {
+  struct section *heap_section = kalloc(sizeof(struct section));
+  memset(heap_section, 0, sizeof(struct section));
+  heap_section->flags |= ST_HEAP;
+  init_sleeplock(&heap_section->sleeplock);
+  init_list_node(&heap_section->stnode);
+  _merge_list(&heap_section->stnode, section_head);
 }
 
 u64 sbrk(i64 size) {
-	//TODO
-	auto this = thisproc();
-	auto section_node = this->pgdir.section_head.next;
-	auto section = container_of(section_node, struct section, stnode);
-	u64 begin = 0;
-	while (!(section->flags & ST_HEAP)) {
-		section_node = section_node->next;
-		section = container_of(section_node, struct section, stnode);
-		begin = MAX(begin, section->end);
-		if (section_node == &(this->pgdir.section_head)) {
-			break;
-		}
-	}
-	if (section_node == &(this->pgdir.section_head)) {
-		// if there is no heap, create it
-		section = create_heap(&(this->pgdir.section_head), begin + PAGE_SIZE);
-	}
+  ListNode *section_head = &thisproc()->pgdir.section_head;
+  struct section *section = NULL;
 
-	auto end = section->end;
-	if (size >= 0) {
-		section->end += size;
-	} else {
-		size = -size;
-		if ((u64)size <= section->end - section->begin) {
-			if (section->flags & ST_SWAP) {
-				swapin(&(this->pgdir), section);
-			}
-			u64 va_begin = (section->end - size) % PAGE_SIZE ? PAGE_BASE(section->end - size) + PAGE_SIZE: PAGE_BASE(section->end - size);
-			for (u64 i = va_begin; i < section->end; i += PAGE_SIZE) {
-				auto pte_ptr = get_pte(&(this->pgdir), i, false);
-				if ((pte_ptr != NULL) && (PTE_FLAGS(*pte_ptr) & PTE_VALID)) {
-					u64 ka = P2K(PTE_ADDRESS(*pte_ptr));
-					kfree_page((void*)ka);
-					*pte_ptr = 0;
-				}
-			}
-			section->end -= size;
-		} else {
-			printk("%lld, %lld, %lld\n", section->begin, section->end, size);
-			PANIC();
-		}
-	}
-	arch_tlbi_vmalle1is();
-	return end;
-}	
+  _for_in_list(sp, section_head) {
+    if (sp == section_head) {
+      continue;
+    }
+    struct section *section_p = container_of(sp, struct section, stnode);
+    if (section_p->flags & ST_HEAP) {
+      section = section_p;
+      break;
+    }
+  }
 
-void* alloc_page_for_user() {
-	while(left_page_cnt() <= REVERSED_PAGES){ //this is a soft limit
-		//TODO
-		auto swp_proc = get_offline_proc();
-		if (swp_proc == NULL) {
-			break;
-		}
-		auto section_node = swp_proc->pgdir.section_head.next;
-		auto section = container_of(section_node, struct section, stnode);
-		while (!(section->flags & ST_HEAP)) {
-			// we ensure that there is heap section
-			section_node = section_node->next;
-			section = container_of(section_node, struct section, stnode);
-		}
-		swapout(&(swp_proc->pgdir), section);
-	}
-	return kalloc_page();
+  if (section == NULL) {
+    printk("no heap section\n");
+    PANIC();
+  }
+
+  u64 ret_addr = section->end;
+  i64 sz = size * PAGE_SIZE;
+  if (size >= 0) {
+    section->end += sz;
+  } else {
+    sz *= -1;
+    if (sz <= (i64)(section->end - section->begin)) {
+      // 不需要拿section的sleeplock
+      while (sz > 0) {
+        section->end -= PAGE_SIZE;
+        PTEntriesPtr pte_p = get_pte(&thisproc()->pgdir, section->end, FALSE);
+        if (pte_p != NULL && *pte_p != 0 && !(*pte_p & PTE_VALID)) {
+          release_8_blocks(*pte_p >> 12);
+        } else if (pte_p != NULL && *pte_p != 0 && (*pte_p & PTE_VALID)) {
+          kfree_page((void *)P2K(PTE_ADDRESS(*pte_p)));
+        }
+        if (pte_p != NULL) {
+          memset(pte_p, 0, sizeof(PTEntry));
+        }
+        sz -= PAGE_SIZE;
+      }
+    } else {
+      printk("no enough space in heap section\n");
+      PANIC();
+    }
+  }
+  arch_tlbi_vmalle1is();
+
+  return ret_addr;
 }
 
-//caller must have the pd->lock
-void swapout(struct pgdir* pd, struct section* st) {
-	ASSERT(!(st->flags & ST_SWAP));
-	st->flags |= ST_SWAP;
-	//TODO
-	u64 begin = st->begin, end = st->end;
-	for (u64 i = begin; i < end; i += PAGE_SIZE) {
-		// set pte_entry invalid
-		auto pte_ptr = get_pte(pd, i, false);
-		if (pte_ptr != NULL && (*pte_ptr & PTE_VALID)) {
-			*pte_ptr &= (~PTE_VALID);
-		}
-	}
-	unalertable_wait_sem(&(st->sleeplock));
-	pd->online = true;
-	_release_spinlock(&(pd->lock));
-	if (st->flags & ST_FILE) {
-		// do nothing
-	} else {
-		for (u64 i = begin; i < end; i += PAGE_SIZE) {
-			// to disk
-			auto pte_ptr = get_pte(pd, i, false);
-			if (pte_ptr != NULL && *pte_ptr != 0 && !(*pte_ptr & PTE_VALID)) {
-				u64 ka = P2K(PTE_ADDRESS(*pte_ptr));
-				*pte_ptr = (write_page_to_disk((void*)ka) << 12);
-				kfree_page((void*)ka);
-			}
-		}
-	}
-	post_sem(&(st->sleeplock));
+void *alloc_page_for_user() {
+  //若两个CPU获得了样的cnt开始分配页，而一个分配完成后，另一个再进入就已经达到软上限,所以要加锁
+  while (left_page_cnt() <= REVERSED_PAGES) { // this is a soft limit
+                                              // TODO
+    while (1) {
+      auto pd = &get_offline_proc()->pgdir;
+      struct section *section = NULL;
+      _for_in_list(p, &pd->section_head) {
+        if (p == &pd->section_head) {
+          continue;
+        }
+        if (p != NULL) {
+          section = container_of(p, struct section, stnode);
+        }
+      }
+      if (section != NULL) {
+        swapout(pd, section);
+        break;
+      }
+      printk("proc has no section\n");
+    }
+  }
+  return kalloc_page();
 }
 
-void swapin(struct pgdir* pd, struct section* st) {
-	ASSERT(st->flags & ST_SWAP);
-	//TODO
-	unalertable_wait_sem(&(st->sleeplock));
-	u64 begin = st->begin, end = st->end;
-	if (st->flags & ST_FILE) {
-		// do nothing
-	} else {
-		for (u64 i = begin; i < end; i += PAGE_SIZE) {
-			// from disk
-			auto pte_ptr = get_pte(pd, i, false);
-			if (pte_ptr != NULL && *pte_ptr != 0 && !(*pte_ptr & PTE_VALID)) {
-				u64 ka = (u64)kalloc_page();
-				u32 bno = (u32)(PTE_ADDRESS(*pte_ptr) >> 12);
-				read_page_from_disk((void*)ka, bno);
-				vmmap(pd, i, (void*)ka, PTE_USER_DATA);
-			}
-		}
-	}
-	post_sem(&(st->sleeplock));
-	st->flags &= ~ST_SWAP;
+// caller must have the pd->lock
+void swapout(struct pgdir *pd, struct section *st) {
+  while (1) {
+    _acquire_spinlock(&pd->lock);
+    if (!(&thisproc()->pgdir != pd && pd->online)) {
+      break;
+    }
+    _release_spinlock(&pd->lock);
+  }
+
+  // _release_spinlock(&pd->lock);
+  ASSERT(!(st->flags & ST_SWAP));
+  st->flags |= ST_SWAP;
+  u64 begin = st->begin, end = st->end;
+  for (u64 va = st->begin; va <= st->end; va += PAGE_SIZE) {
+    PTEntriesPtr pte_p = get_pte(pd, va, FALSE);
+    if (pte_p != NULL && *pte_p != 0) {
+      *pte_p &= ~PTE_VALID;
+    }
+  }
+
+  setup_checker(0);
+  ASSERT(acquire_sleeplock(0, &st->sleeplock));
+  // if (_try_acquire_spinlock(&pd->lock)) {
+  //   // printk("swap out: not online\n");
+  // }
+  _release_spinlock(&pd->lock);
+
+  if (!(st->flags & ST_FILE)) {
+    for (u64 p = begin; p <= end; p += PAGE_SIZE) {
+      PTEntriesPtr pte_p = get_pte(pd, p, FALSE);
+      if (pte_p != NULL && *pte_p != 0) {
+        auto bno = write_page_to_disk((void *)p);
+        kfree_page((void *)P2K(PTE_ADDRESS(*pte_p)));
+        *pte_p = (bno << 12) & ~PTE_VALID;
+      }
+    }
+  }
+  release_sleeplock(0, &st->sleeplock);
+}
+// Free 8 continuous disk blocks
+void swapin(struct pgdir *pd, struct section *st) {
+  ASSERT(st->flags & ST_SWAP);
+  // TODO
+  setup_checker(0);
+  ASSERT(acquire_sleeplock(0, &st->sleeplock));
+
+  for (u64 p = st->begin; p <= st->end; p += PAGE_SIZE) {
+    PTEntriesPtr pte_p = get_pte(pd, p, FALSE);
+    if (pte_p != NULL && *pte_p != 0) {
+      auto page_p = alloc_page_for_user();
+      read_page_from_disk((void *)page_p, *pte_p >> 12);
+      release_8_blocks(*pte_p >> 12);
+      vmmap(pd, p, page_p, PTE_USER_DATA);
+    }
+  }
+
+  release_sleeplock(0, &st->sleeplock);
+
+  for (u64 p = st->begin; p <= st->end; p += PAGE_SIZE) {
+    PTEntriesPtr pte_p = get_pte(pd, p, FALSE);
+    if (pte_p != NULL && *pte_p != 0) {
+      *pte_p |= PTE_VALID;
+    }
+  }
+
+  st->flags &= ~ST_SWAP;
 }
 
 int pgfault(u64 iss) {
-	struct proc* p = thisproc();
-	struct pgdir* pd = &p->pgdir;
-	u64 addr = arch_get_far();
-	//TODO
-	// find the corresponding section
-	auto section_node = p->pgdir.section_head.next;
-	auto section = container_of(section_node, struct section, stnode);
-	while (!(section->begin <= addr && addr < section->end)) {
-		section_node = section_node->next;
-		ASSERT(section_node != &(p->pgdir.section_head));
-		section = container_of(section_node, struct section, stnode);
-	}
+  (void)iss;
+  // printk("iss is %lld\n", iss);
+  struct proc *p = thisproc();
+  struct pgdir *pd = &p->pgdir;
+  u64 addr = arch_get_far();
+  ListNode *section_head = &pd->section_head;
+  struct section *section = NULL;
+  // TODO
+  // addr find sectioin : begin ?
+  _for_in_list(p, section_head) {
+    if (p == section_head) {
+      continue;
+    }
+    struct section *section_p = container_of(p, struct section, stnode);
+    printk("section_p:%p", section_p);
+    if (section_p->begin <= addr && section_p->end > addr) {
+      section = section_p;
+      break;
+    }
+  }
+  // printk("addr is %p\n", (void *)addr);
+  if (section == NULL) {
+    printk("no corresponding section\n");
+    PANIC();
+  }
 
-	PTEntry pa = *get_pte(pd, addr, true);
-	if (pa == 0) {
-		// lazy allocation
-		// if (section->flags & ST_FILE) {
-		// 	// if it is file
-		// 	// read from disk
-		// 	void* new_page = alloc_page_for_user();
-		// 	u64 offset = section->offset + PAGE_BASE(addr - section->begin); // offset should aligns to PAGE_SIZE
-		// 	inodes.lock(section->fp->ip);
-		// 	inodes.read(section->fp->ip, new_page, offset, MIN((u64)PAGE_SIZE, section->offset + section->length - offset));
-		// 	inodes.unlock(section->fp->ip);
-		// 	vmmap(pd, addr, new_page, (section->flags & ST_RO) ? PTE_USER_DATA | PTE_RO : PTE_USER_DATA);
-		// } else 
-		if (section->flags & ST_SWAP) { // if swapout
-			swapin(pd, section);
-			void* new_page = alloc_page_for_user();
-			vmmap(pd, addr, new_page, PTE_USER_DATA);
-		} else {
-			void* new_page = alloc_page_for_user();
-			vmmap(pd, addr, new_page, PTE_USER_DATA);
-		}
-	} else if (pa & PTE_RO) {
-		// copy on write
-		void* old_page = (void*)P2K(PTE_ADDRESS(pa));
-		void* new_page = alloc_page_for_user();
-		memcpy(new_page, old_page, PAGE_SIZE);
-		vmmap(pd, addr, new_page, PTE_USER_DATA);
-		kfree_page(old_page);
-	} else if (!(pa & PTE_VALID)) {
-		swapin(pd, section);
-	} else {
-		PANIC();
-	}
-	arch_tlbi_vmalle1is();
-	return (int)iss;
+  PTEntriesPtr pte_p = get_pte(pd, addr, false);
+
+  if (pte_p == NULL || *pte_p == 0) {
+    // swapin if need?
+    // printk("pg fault:null lazy allocation\n");
+    if (section->flags & ST_SWAP) {
+      swapin(pd, section);
+    } else {
+      auto page = alloc_page_for_user();
+      vmmap(pd, addr, page, PTE_USER_DATA | PTE_RW);
+    }
+  } else if (*pte_p & PTE_RO) {
+    // printk("pg fault: COW\n");
+    kfree_page((void *)P2K(PTE_ADDRESS(*pte_p)));
+    auto page = alloc_page_for_user();
+    vmmap(pd, addr, page, PTE_USER_DATA | PTE_RW);
+    // all zero page no need to memcpy
+
+  } else if (!(*pte_p & PTE_VALID)) {
+    if (section->flags & ST_SWAP) {
+      // printk("pg fault:swap in\n");
+      swapin(pd, section);
+    } else {
+      // printk("pg fault:invalid lazy allocation\n");
+
+      auto page = alloc_page_for_user();
+      vmmap(pd, addr, page, PTE_USER_DATA | PTE_RW);
+    }
+
+  } else {
+    return -1;
+  }
+  arch_tlbi_vmalle1is();
+
+  return 0;
 }
 
-void init_sections(ListNode* section_head) {
-	struct section* heap = kalloc(sizeof(struct section));
-	heap->flags = ST_HEAP;
-	init_sleeplock(&(heap->sleeplock));
-	heap->begin = 0x0;
-	heap->end = 0x0;
-	init_list_node(&(heap->stnode));
-	_insert_into_list(section_head, &(heap->stnode));
-}
+void free_sections(struct pgdir *pd) {
+  while (!_empty_list(&pd->section_head)) {
+    auto p = pd->section_head.next;
+    auto section = container_of(p, struct section, stnode);
 
-void free_sections(struct pgdir* pd) {
-	auto section_node = pd->section_head.next;
-	while (section_node != &(pd->section_head)) {
-		auto section = container_of(section_node, struct section, stnode);
-		if (section->flags & ST_SWAP) {
-			swapin(pd, section);
-		}
-		for (u64 i = PAGE_BASE(section->begin); i < section->end; i += PAGE_SIZE) {
-			auto pte_ptr = get_pte(pd, i, false);
-			if (pte_ptr == NULL) {
-				continue;
-			}
-			if (*pte_ptr & PTE_VALID) {
-				u64 ka = P2K(PTE_ADDRESS(*pte_ptr)); 
-				kfree_page((void*)ka);
-			}
-		}
-		section_node = section_node->next;
-		_detach_from_list(&(section->stnode));
-		kfree((void*)section);
-	}
-}
-
-void copy_sections(ListNode* from_head, ListNode* to_head) {
-	ListNode* a = from_head->next, *b = to_head;
-	while (a != from_head) {
-		// init
-		auto st = container_of(a, struct section, stnode);
-		struct section* new_st = kalloc(sizeof(struct section));
-		new_st->flags = st->flags;
-		init_sleeplock(&(st->sleeplock));
-		new_st->begin = st->begin;
-		new_st->end = st->end;
-		if (st->fp) {
-			new_st->fp = filedup(st->fp);
-		}
-		new_st->offset = st->offset;
-		new_st->length = st->length;
-		// add to list
-		_insert_into_list(b, &(new_st->stnode));
-		a = a->next;
-		b = b->next;
-	}
+    for (auto addr = section->begin; addr < section->end; addr += PAGE_SIZE) {
+      PTEntriesPtr pte_p = get_pte(pd, addr, FALSE);
+      if (pte_p != NULL && !(*pte_p & PTE_VALID) && *pte_p != 0) {
+        release_8_blocks(*pte_p >> 12);
+      } else if (pte_p != NULL) {
+        kfree_page((void *)P2K(PTE_ADDRESS(*pte_p)));
+      }
+    }
+    _detach_from_list(p);
+    kfree(section);
+  }
 }

@@ -21,7 +21,7 @@ void init_filesystem() {
   init_bcache(sblock, &block_device);
   init_inodes(sblock, &bcache);
   init_ftable();
-  // set_interrupt_handler(IRQ_AUX, _console_intr);
+  set_interrupt_handler(IRQ_AUX, _console_intr);
 }
 define_rest_init(fs) {
   init_filesystem();

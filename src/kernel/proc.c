@@ -1,338 +1,277 @@
-#include <kernel/proc.h>
-#include <kernel/init.h>
-#include <kernel/mem.h>
-#include <kernel/sched.h>
+#include "aarch64/intrinsic.h"
+#include "aarch64/mmu.h"
+#include "common/defines.h"
+#include "common/sem.h"
+#include "common/spinlock.h"
+#include "fs/cache.h"
+#include "fs/inode.h"
+#include "kernel/pt.h"
 #include <common/list.h>
 #include <common/string.h>
+#include <kernel/container.h>
+#include <kernel/init.h>
+#include <kernel/mem.h>
 #include <kernel/printk.h>
-#include <kernel/paging.h>
+#include <kernel/proc.h>
+#include <kernel/sched.h>
 
 struct proc root_proc;
 extern struct container root_container;
 
 void kernel_entry();
 void proc_entry();
+static SpinLock plock;
+SpinLock pid_lock;
 
-// a map from pid to pcb
-typedef struct pid_map_pcb {
-    int pid;
-    struct proc* pcb;
-    struct rb_node_ node;
-} pid_map_pcb_t;
+static struct pid_pool global_pids;
 
-typedef struct pid_pcb_tree {
-    struct rb_root_ root;
-} pid_pcb_tree_t;
-
-static bool _cmp_pid_pcb(rb_node lnode, rb_node rnode) {
-    auto lp = container_of(lnode, pid_map_pcb_t, node);
-    auto rp = container_of(rnode, pid_map_pcb_t, node);
-    return lp->pid < rp->pid;
+define_early_init(plock) {
+  init_spinlock(&plock);
+  init_spinlock(&pid_lock);
+  _acquire_spinlock(&pid_lock);
+  global_pids.avail = 1;
+  for (int i = 0; i < PID_NUM; i++) {
+    global_pids.freelist[i] = i;
+  }
+  _release_spinlock(&pid_lock);
 }
 
-static pid_pcb_tree_t pid_pcb;
-static pid_bitmap_t global_pid;
-static SpinLock ptree_lock, pid_pcb_lock;
-
-static int alloc_pid(pid_bitmap_t* pid_bitmap) {
-    _acquire_spinlock(&(pid_bitmap->pid_lock)); 
-    int ret = -1;
-    for (int i = pid_bitmap->last_pid + 1; i < pid_bitmap->size; ++i) {
-        if (bitmap_get(pid_bitmap->bitmap, i) == false) {
-            ret = i;
-            bitmap_set(pid_bitmap->bitmap, i);
-            break;
-        }
-    }
-    if (ret == -1) {
-        for (int i = 0; i < pid_bitmap->last_pid; ++i) {
-            if (bitmap_get(pid_bitmap->bitmap, i) == false) {
-                ret = i;
-                bitmap_set(pid_bitmap->bitmap, i);
-                break;
-            }
-        }
-    }
-    ASSERT(ret != -1);
-    pid_bitmap->last_pid = ret;
-    _release_spinlock(&(pid_bitmap->pid_lock));
-    return ret;
-}
-
-static void free_pid(pid_bitmap_t* pid_bitmap, int pid) {
-    _acquire_spinlock(&(pid_bitmap->pid_lock));
-    bitmap_clear(pid_bitmap->bitmap, pid);
-    _release_spinlock(&(pid_bitmap->pid_lock));
-}
-
-define_early_init(global_pid) {
-    init_spinlock(&(global_pid.pid_lock));
-    memset(global_pid.bitmap, 0, MAX_PID / 8);
-    bitmap_set(global_pid.bitmap, 0);
-    global_pid.last_pid = 0;
-    global_pid.size = MAX_PID;
-}
-
-define_early_init(ptree_lock) {
-    init_spinlock(&ptree_lock);
-    init_spinlock(&pid_pcb_lock);
-}
-
-void set_parent_to_this(struct proc* proc) {
-    // TODO: set the parent of proc to thisproc
-    // NOTE: maybe you need to lock the process tree
-    // NOTE: it's ensured that the old proc->parent = NULL
-    _acquire_spinlock(&ptree_lock);
-    if (proc->parent == NULL) {
-        // insert into rb_tree
-        pid_map_pcb_t *in_node = kalloc(sizeof(pid_map_pcb_t));
-        in_node->pid = proc->pid;
-        in_node->pcb = proc;
-        _acquire_spinlock(&pid_pcb_lock);
-        ASSERT(_rb_insert(&(in_node->node), &pid_pcb.root, _cmp_pid_pcb) == 0);
-        _release_spinlock(&pid_pcb_lock);
-    }
-    proc->parent = thisproc();
-    _insert_into_list(&(thisproc()->children), &(proc->ptnode));
-    _release_spinlock(&ptree_lock);
+void set_parent_to_this(struct proc *proc) {
+  _acquire_spinlock(&plock);
+  auto this = thisproc();
+  proc->parent = this;
+  _insert_into_list(&this->children, &proc->ptnode);
+  // printk("set child:%d to parent:%d\n", proc->pid, this->pid);
+  _release_spinlock(&plock);
 }
 
 NO_RETURN void exit(int code) {
-    // TODO
-    // 1. set the exitcode
-    // 2. clean up the resources
-    // 3. transfer children to the rootproc of the container, and notify the it if there is zombie
-    // 4. notify the parent
-    // 5. sched(ZOMBIE)
-    // NOTE: be careful of concurrency
-    _acquire_spinlock(&ptree_lock);
-    auto this = thisproc();
-    ASSERT(this != this->container->rootproc && !this->idle); 
-    this->exitcode = code;
-    // transfer children to thisproc's container's rootproc
-    auto p = (this->children).next;
-    struct proc* rp = this->container->rootproc;
-    while (p != &(this->children)) {
-        auto q = p->next;
-        _insert_into_list(&(rp->children), p);
-        auto child = container_of(p, struct proc, ptnode);
-        child->parent = rp;
-        p = q;
-    }
+  // TODO
+  // 1. set the exitcode
+  // 2. clean up the resources
+  // 3. transfer children to the root_proc, and notify the root_proc if there is
+  // zombie
+  // 4. notify the parent
+  // 5. sched(ZOMBIE)
+  // NOTE: be careful of concurrency
+  setup_checker(0);
+  auto this = thisproc();
 
-    // transfer zombie children to thisproc's container's rootproc
-    p = (this->zombie_children).next;
-    while (p != &(this->zombie_children)) {
-        auto q = p->next;
-        _insert_into_list(&(rp->zombie_children), p);
-        auto child = container_of(p, struct proc, ptnode);
-        child->parent = rp;
-        p = q;
-        post_sem(&(rp->childexit));
+  for (int fd = 0; fd < NOFILE; fd++) {
+    if (this->oftable.ofile[fd]) {
+      struct file *f = this->oftable.ofile[fd];
+      fileclose(f);
+      this->oftable.ofile[fd] = 0;
     }
-    // free resource
-    free_pgdir(&(this->pgdir));
-    // free file
-    for (int i = 0; i < NOFILE; ++i) {
-        if (this->oftable.otable[i]) {
-            fileclose(this->oftable.otable[i]);
-            this->oftable.otable[i] = NULL;
-        }
+  }
+
+  OpContext ctx;
+  bcache.begin_op(&ctx);
+  inodes.put(&ctx, this->cwd);
+  bcache.end_op(&ctx);
+  this->cwd = 0;
+
+  _acquire_spinlock(&plock);
+  // printk("%d exit\n", this->pid);
+  ASSERT(this != this->container->rootproc && !this->idle);
+
+  this->exitcode = code;
+  _for_in_list(rcp, &this->children) {
+    if (rcp == &this->children) {
+      continue;
     }
-    OpContext ctx;
-    bcache.begin_op(&ctx);
-    inodes.put(&ctx, this->cwd);
-    bcache.end_op(&ctx);
-    this->cwd = NULL;
-    
-    // notify parent proc
-    _detach_from_list(&(this->ptnode));
-    _insert_into_list(&(this->parent->zombie_children), &(this->ptnode));
-    post_sem(&(this->parent->childexit));
-    
-    _acquire_sched_lock();
-    _release_spinlock(&ptree_lock);
-    _sched(ZOMBIE);
-    PANIC(); // prevent the warning of 'no_return function returns'
+    auto rc = container_of(rcp, struct proc, ptnode);
+    if (is_zombie(rc)) {
+      // printk("post root %d,sem %d\n", rc->pid,
+      //        this->container->rootproc->childexit.val + 1);
+      post_sem(&this->container->rootproc->childexit);
+    }
+  }
+
+  if (!_empty_list(&this->children)) {
+    _for_in_list(rcp, &this->children) {
+      if (rcp == &this->children) {
+        continue;
+      }
+      auto rc = container_of(rcp, struct proc, ptnode);
+      rc->parent = this->container->rootproc;
+      // printk("move child %dto root", rc->pid);
+    }
+    auto merged_list = this->children.next;
+    _detach_from_list(&this->children);
+    _merge_list(merged_list, &this->container->rootproc->children);
+  }
+
+  free_pgdir(&this->pgdir);
+  post_sem(&this->parent->childexit);
+  // printk("%d exit, post to parent %d\n", this->pid, this->parent->pid);
+  lock_for_sched(0);
+  _acquire_spinlock(&pid_lock);
+  global_pids.freelist[--global_pids.avail] = this->pid;
+  _release_spinlock(&pid_lock);
+
+  _release_spinlock(&plock);
+
+  sched(0, ZOMBIE);
+
+  PANIC(); // prevent the warning of 'no_return function returns'
 }
 
-int wait(int* exitcode, int* pid)
-{
-    // TODO
-    // 1. return -1 if no children
-    // 2. wait for childexit
-    // 3. if any child exits, clean it up and return its local pid and exitcode
-    // NOTE: be careful of concurrency
-    _acquire_spinlock(&ptree_lock);
-    auto this = thisproc();
+int wait(int *exitcode, int *pid) {
 
-    // if no children
-    if ((this->children).next == &(this->children)
-        && (this->zombie_children).next == &(this->zombie_children)
-    ) {
-        _release_spinlock(&ptree_lock);
-        return -1;
+  // TODO
+  // 1. return -1 if no children
+  // 2. wait for childexit
+  // 3. if any child exits, clean it up and return its local pid and exitcode
+  // NOTE: be careful of concurrency
+
+  _acquire_spinlock(&plock);
+  auto this = thisproc();
+  // printk("cpu %d %d wait for child exit\n", cpuid(), this->pid);
+  if (_empty_list(&this->children)) {
+    _release_spinlock(&plock);
+    // printk("%d no child\n", this->pid);
+    return -1;
+  }
+  _release_spinlock(&plock);
+  auto ret = wait_sem(&this->childexit);
+  // printk("wait sem ret:%d", ret);
+  if (!ret) {
+    return -1;
+  }
+  _acquire_spinlock(&plock);
+  _for_in_list(c, &this->children) {
+    if (c == &this->children) {
+      continue;
     }
-    _release_spinlock(&ptree_lock);
-
-    if (wait_sem(&this->childexit) == false) {
-        return -1;
+    auto child = container_of(c, struct proc, ptnode);
+    if (is_zombie(child)) {
+      auto lpid = child->localpid;
+      *exitcode = child->exitcode;
+      *pid = child->pid;
+      _acquire_spinlock(&child->container->pid_lock);
+      child->container->pids.freelist[--child->container->pids.avail] = lpid;
+      _release_spinlock(&child->container->pid_lock);
+      _detach_from_list(&child->ptnode);
+      kfree(child);
+      // printk("cpu %d %d wait return\n", cpuid(), this->pid);
+      _release_spinlock(&plock);
+      // printk("parent:%d,child zombie:%d\n", this->pid, lpid);
+      return lpid;
     }
-    _acquire_spinlock(&ptree_lock);
-    auto p = (this->zombie_children).next;
-    _detach_from_list(p);
-    auto child = container_of(p, struct proc, ptnode);
-    *pid = child->pid;
-    *exitcode = child->exitcode;
-    
-    // erase from rb_tree
-    pid_map_pcb_t del_node = {child->pid, NULL, {0, 0, 0}};
-    _acquire_spinlock(&pid_pcb_lock);
-    auto find_node = _rb_lookup(&(del_node.node), &pid_pcb.root, _cmp_pid_pcb);
-    _rb_erase(find_node, &pid_pcb.root);
-    _release_spinlock(&pid_pcb_lock);
-    kfree(container_of(find_node, pid_map_pcb_t, node));
-    
-    int ret = child->localpid;
-    // free pid resource
-    free_pid(&global_pid, child->pid);
-    free_pid(&(this->container->local_pid), child->localpid);
-
-    kfree_page(child->kstack);
-    kfree(child);
-    _release_spinlock(&ptree_lock);
-    return ret;
+  }
+  PANIC();
 }
 
-int kill(int pid)
-{
-    // TODO
-    // Set the killed flag of the proc to true and return 0.
-    // Return -1 if the pid is invalid (proc not found).
-    _acquire_spinlock(&ptree_lock);
-    
-    // find from rb_tree 
-    pid_map_pcb_t kill_node = {pid, NULL, {0, 0, 0}};
-    _acquire_spinlock(&pid_pcb_lock);
-    auto find_node = _rb_lookup(&(kill_node.node), &pid_pcb.root, _cmp_pid_pcb);
-    _release_spinlock(&pid_pcb_lock);
-
-    if (find_node == NULL) {
-        _release_spinlock(&ptree_lock);
-        return -1;
-    }
-    auto p = container_of(find_node, pid_map_pcb_t, node);
-    if (is_unused(p->pcb)) {
-        _release_spinlock(&ptree_lock);
-        return -1;
-    }
-    p->pcb->killed = true;
-    alert_proc(p->pcb);
-    _release_spinlock(&ptree_lock);
-    return 0;
-}
-
-int start_proc(struct proc* p, void(*entry)(u64), u64 arg)
-{
-    // TODO
-    // 1. set the parent to root_proc if NULL
-    // 2. setup the kcontext to make the proc start with proc_entry(entry, arg)
-    // 3. activate the proc and return its local pid
-    // NOTE: be careful of concurrency
-    if (p->parent == NULL) {
-        _acquire_spinlock(&ptree_lock);
-        p->parent = &root_proc;
-        _insert_into_list(&root_proc.children, &p->ptnode);
-        _release_spinlock(&ptree_lock);
-
-        // insert into rb_tree
-        pid_map_pcb_t *in_node = kalloc(sizeof(pid_map_pcb_t));
-        in_node->pid = p->pid;
-        in_node->pcb = p;
-        _acquire_spinlock(&pid_pcb_lock);
-        ASSERT(_rb_insert(&(in_node->node), &pid_pcb.root, _cmp_pid_pcb) == 0);
-        _release_spinlock(&pid_pcb_lock);
-    }
-    p->kcontext->lr = (u64)&proc_entry;
-    p->kcontext->x0 = (u64)entry;
-    p->kcontext->x1 = (u64)arg;
-    p->localpid = alloc_pid(&(p->container->local_pid));
-    int id = p->localpid;
-    activate_proc(p);
-    return id;
-}
-
-void init_proc(struct proc* p) {
-    // TODO
-    // setup the struct proc with kstack and pid allocated
-    // NOTE: be careful of concurrency
-    memset(p, 0, sizeof(*p));
-    p->pid = alloc_pid(&global_pid);
-    init_sem(&p->childexit, 0);
-    init_list_node(&p->children);
-    init_list_node(&p->ptnode);
-    init_list_node(&p->zombie_children);
-    init_pgdir(&p->pgdir);
-    init_schinfo(&p->schinfo, false);
-    init_oftable(&(p->oftable));
-    p->kstack = kalloc_page();
-    p->container = &root_container;
-    memset(p->kstack, 0, PAGE_SIZE);
-    p->kcontext = (KernelContext*)((u64)p->kstack + PAGE_SIZE - 16 - sizeof(KernelContext) - sizeof(UserContext));
-    p->ucontext = (UserContext*)((u64)p->kstack + PAGE_SIZE - 16 - sizeof(UserContext));
-}
-
-struct proc* create_proc()
-{
-    struct proc* p = kalloc(sizeof(struct proc));
-    init_proc(p);
-    return p;
-}
-
-static struct proc* recursive_get_offline_proc(struct proc* cur_proc) {
-    ListNode* child_node = cur_proc->children.next;
-    struct proc* child;
-    while (child_node != &(cur_proc->children)) {
-        child = container_of(child_node, struct proc, ptnode);
-        
-        _acquire_spinlock(&(child->pgdir.lock));
-        if (child->pgdir.online == false) {
-            _release_spinlock(&(child->pgdir.lock));
-            return child;
-        }
-        _release_spinlock(&(child->pgdir.lock));
-
-        auto ret = recursive_get_offline_proc(child);
-        if (ret != NULL) {
-            _acquire_spinlock(&(ret->pgdir.lock));
-            if (ret->pgdir.online == false) {
-                _release_spinlock(&(ret->pgdir.lock));
-                return ret;
-            }
-            _release_spinlock(&(ret->pgdir.lock));
-        }
-        child_node = child_node->next;
-    }
+struct proc *dfs(struct proc *proc, int pid, bool offline) {
+  if ((proc->pid == pid || (offline && !proc->pgdir.online)) &&
+      proc->state != UNUSED) {
+    return proc;
+  }
+  if (_empty_list(&proc->children)) {
     return NULL;
-}
-
-struct proc* get_offline_proc() {
-    _acquire_spinlock(&ptree_lock);
-    struct proc* ret = recursive_get_offline_proc(&root_proc);
-    if (ret == NULL) {
-        _release_spinlock(&ptree_lock);
-        return ret;
+  }
+  _for_in_list(cp, &proc->children) {
+    if (cp == &proc->children) {
+      continue;
     }
-    _acquire_spinlock(&(ret->pgdir.lock));
-    _release_spinlock(&ptree_lock);
-    return ret;
+    auto c_proc = container_of(cp, struct proc, ptnode);
+    auto child_res = dfs(c_proc, pid, offline);
+    if (child_res != NULL) {
+      return child_res;
+    }
+  }
+  return NULL;
 }
 
-define_init(root_proc)
-{
-    init_proc(&root_proc);
-    root_proc.parent = &root_proc;
-    start_proc(&root_proc, kernel_entry, 123456);
+int kill(int pid) {
+  // TODO
+  // Set the killed flag of the proc to true and return 0.
+  // Return -1 if the pid is invalid (proc not found).
+  // printk("to kill %d\n", pid);
+  _acquire_spinlock(&plock);
+  auto kill_proc = dfs(&root_proc, pid, false);
+  if (kill_proc != NULL) {
+    kill_proc->killed = true;
+    _release_spinlock(&plock);
+    // printk("kill %d\n", pid);
+    alert_proc(kill_proc);
+    return 0;
+  }
+  _release_spinlock(&plock);
+  // printk("can't kill %d\n", pid);
+  return -1;
+}
+
+bool is_killed(struct proc *proc) {
+  _acquire_spinlock(&plock);
+  auto ret = proc->killed;
+  _release_spinlock(&plock);
+  return ret;
+}
+
+int start_proc(struct proc *p, void (*entry)(u64), u64 arg) {
+  // TODO
+  // 1. set the parent to root_proc if NULL
+  // 2. setup the kcontext to make the proc start with proc_entry(entry, arg)
+  // 3. activate the proc and return its local pid
+  // NOTE: be careful of concurrency
+  _acquire_spinlock(&plock);
+  if (p->parent == NULL) {
+    p->parent = &root_proc;
+    _insert_into_list(&root_proc.children, &p->ptnode);
+  }
+  p->kcontext->lr = (u64)&proc_entry;
+  p->kcontext->x0 = (u64)entry;
+  p->kcontext->x1 = (u64)arg;
+  _acquire_spinlock(&p->container->pid_lock);
+  int id = p->container->pids.freelist[p->container->pids.avail++];
+  _release_spinlock(&p->container->pid_lock);
+  p->localpid = id;
+  activate_proc(p);
+  _release_spinlock(&plock);
+  return id;
+}
+
+void init_proc(struct proc *p) {
+  _acquire_spinlock(&plock);
+  memset(p, 0, sizeof(*p));
+  _acquire_spinlock(&pid_lock);
+  p->pid = global_pids.freelist[global_pids.avail++];
+  _release_spinlock(&pid_lock);
+  p->container = &root_container;
+  init_sem(&p->childexit, 0);
+  init_list_node(&p->children);
+  init_list_node(&p->ptnode);
+  init_pgdir(&p->pgdir);
+  p->kstack = kalloc_page();
+  init_schinfo(&p->schinfo, false);
+  p->kcontext = (KernelContext *)((u64)p->kstack + PAGE_SIZE - 16 -
+                                  sizeof(KernelContext) - sizeof(UserContext));
+  p->ucontext =
+      (UserContext *)((u64)p->kstack + PAGE_SIZE - 16 - sizeof(UserContext));
+  _release_spinlock(&plock);
+}
+
+struct proc *create_proc() {
+  struct proc *p = kalloc(sizeof(struct proc));
+  init_proc(p);
+  return p;
+}
+
+define_init(root_proc) {
+  init_proc(&root_proc);
+  root_proc.parent = &root_proc;
+  start_proc(&root_proc, kernel_entry, 123456);
+}
+
+struct proc *get_offline_proc() {
+  auto offline_proc = dfs(&root_proc, 0, true);
+  if (offline_proc == NULL) {
+    printk("no offline in proc tree\n");
+    PANIC();
+  }
+  return offline_proc;
 }
 
 /*
@@ -340,45 +279,43 @@ define_init(root_proc)
  * Sets up stack to return as if from system call.
  */
 void trap_return();
-int fork() {
-    /* TODO: Your code here. */
-    auto this = thisproc();
-    auto child = create_proc();
-    set_parent_to_this(child);
-    set_container_to_this(child);
-    init_pgdir(&(child->pgdir));
-    
-    // copy trapframe
-    *(child->ucontext) = *(this->ucontext);
-    child->cwd = inodes.share(this->cwd);
-    // child process's fork() returns 0
-    child->ucontext->x[0] = 0;
+int fork() { /* TODO: Your code here. */
+  int i, pid;
+  struct proc *np;
+  struct proc *p = thisproc();
 
-    // copy file
-    for (int i = 0; i < NOFILE; ++i) {
-        if (this->oftable.otable[i] != NULL) {
-            child->oftable.otable[i] = filedup(this->oftable.otable[i]);
-        }
-    }
+  // Allocate process.
+  if ((np = create_proc()) == 0) {
+    return -1;
+  }
+  _acquire_spinlock(&plock);
+  // Copy user memory from parent to child.
+  // printk("uvm start : %llx", p->uvm_start);
+  uvmcopy(&p->pgdir, &np->pgdir, p->sz, p->uvm_start);
+  // if (uvmcopy(p->pagetable, np->pagetable, p->sz) < 0) {
+  //   freeproc(np);
+  //   release(&np->lock);
+  //   return -1;
+  // }
+  // np->sz = p->sz;
 
-    // copy pgdir
-    copy_sections(&(this->pgdir.section_head), &(child->pgdir.section_head));
-    auto st = this->pgdir.section_head.next;
-    while (st != &(this->pgdir.section_head)) {
-        auto section = container_of(st, struct section, stnode);
-        for (u64 i = PAGE_BASE(section->begin); i < section->end; i += PAGE_SIZE) {
-            auto pte_ptr = get_pte(&(this->pgdir), i, false);
-            if (pte_ptr == NULL || !(*pte_ptr & PTE_VALID)) { // what if swapout?
-                break;
-            }
-            void* ka = kalloc_page();
-            memcpy(ka, (void*)P2K(PTE_ADDRESS(*pte_ptr)), PAGE_SIZE);
-            vmmap(&(child->pgdir), i, ka, PTE_FLAGS(*pte_ptr));
-        }
-        st = st->next;
-    }
+  // copy saved user registers.
+  *np->ucontext = *p->ucontext;
+  np->uvm_start = p->uvm_start;
+  np->sz = p->sz;
+  p->ucontext->x[0] = 0; // Cause fork to return 0 in the child.
 
-    start_proc(child, trap_return, 0);
-    arch_tlbi_vmalle1is();
-    return child->localpid;
+  // increment reference counts on open file descriptors.
+  for (i = 0; i < NOFILE; i++)
+    if (p->oftable.ofile[i])
+      np->oftable.ofile[i] = filedup(p->oftable.ofile[i]);
+  np->cwd = inodes.share(p->cwd);
+  pid = np->pid;
+  _release_spinlock(&plock);
+  set_parent_to_this(np);
+  start_proc(np, trap_return, 0);
+  np->cwd = inodes.share(p->cwd);
+  // printk("elr:%llx\n", p->ucontext->elr);
+  printk(" %d fork child %d \n", p->pid, np->pid);
+  return pid;
 }
