@@ -19,10 +19,10 @@ int main() {
   }
   dup(0); // stdout
   dup(0); // stderr
-
   while (1) {
     printf("init: starting sh\n");
     pid = fork();
+    printf("pid:%d\n", pid);
     if (pid < 0) {
       printf("init: fork failed\n");
       exit(1);
@@ -32,7 +32,6 @@ int main() {
       printf("init: exec sh failed\n");
       exit(1);
     }
-    wpid = wait(NULL);
     while ((wpid = wait(NULL)) >= 0 && wpid != pid)
       printf("zombie!\n");
   }

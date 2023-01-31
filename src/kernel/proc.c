@@ -303,7 +303,6 @@ int fork() { /* TODO: Your code here. */
   *np->ucontext = *p->ucontext;
   np->uvm_start = p->uvm_start;
   np->sz = p->sz;
-  p->ucontext->x[0] = 0; // Cause fork to return 0 in the child.
 
   // increment reference counts on open file descriptors.
   for (i = 0; i < NOFILE; i++)
@@ -317,5 +316,7 @@ int fork() { /* TODO: Your code here. */
   np->cwd = inodes.share(p->cwd);
   // printk("elr:%llx\n", p->ucontext->elr);
   printk(" %d fork child %d \n", p->pid, np->pid);
+  np->ucontext->x[0] = 0; // Cause fork to return 0 in the child.
+
   return pid;
 }

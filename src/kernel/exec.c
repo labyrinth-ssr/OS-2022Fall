@@ -43,26 +43,22 @@ static int loaduvm(struct pgdir *pgdir, u64 va, Inode *ip, u32 offset, u32 sz) {
 
 int execve(const char *path, char *const argv[], char *const envp[]) {
   // TODO
-  // printk("in execve\n");
+  printk("in execve:path %s,\n", path);
   u64 argc, sz = 0, sp, ustack[7], stackbase;
 
-  // init_filesystem();
   (void)envp;
   OpContext ctx;
   bcache.begin_op(&ctx);
-  // printk("path:%s\n", path);
   Inode *ip = namei(path, &ctx);
   if (!ip)
     return -1;
   inodes.lock(ip);
-  // printk("ip:%p\n", ip);
 
   Elf64_Ehdr elf;
   struct proc *p = thisproc();
   struct pgdir *pgdir = kalloc(sizeof(struct pgdir));
   init_pgdir(pgdir);
 
-  // &thisproc()->pgdir;
   if (inodes.read(ip, (u8 *)(&elf), 0, sizeof(elf)) < sizeof(elf)) {
     goto bad;
   }
@@ -71,8 +67,6 @@ int execve(const char *path, char *const argv[], char *const envp[]) {
   }
 
   Elf64_Phdr ph;
-  // printk("elf.e_phoff:%lld,elf.e_phnum:%lld\n", (u64)elf.e_phoff,
-  //  (u64)elf.e_phnum);
   for (u64 i = 0, off = elf.e_phoff; i < elf.e_phnum; i++, off += sizeof(ph)) {
     if ((inodes.read(ip, (u8 *)&ph, off, sizeof(ph)) != sizeof(ph)))
       goto bad;
@@ -85,12 +79,7 @@ int execve(const char *path, char *const argv[], char *const envp[]) {
 
     if (ph.p_memsz < ph.p_filesz)
       goto bad;
-    // printk("vaddr:%llx\n", (u64)ph.p_vaddr);
-    // printk("sz:%llx\n", (u64)ph.p_memsz);
     sz = (u64)uvm_alloc(pgdir, sz, sz + ph.p_memsz);
-    // printk("alloc sz:%llx\n", sz);
-
-    // printk("offset:%llx", (u64)ph.p_offset);
     if (loaduvm(pgdir, (u64)ph.p_vaddr, ip, (u32)ph.p_offset,
                 (u32)ph.p_filesz) < 0) {
       goto bad;
@@ -102,9 +91,7 @@ int execve(const char *path, char *const argv[], char *const envp[]) {
   ip = 0;
 
   p = thisproc();
-  // printk("alloced sz:%llx", sz);
   sz = ROUNDUP(sz, PAGE_SIZE);
-  // printk("stack start : %llx\n", sz);
   u64 sz1;
   if ((sz1 = uvm_alloc(pgdir, sz, sz + 2 * PAGE_SIZE)) == 0)
     goto bad;
@@ -114,21 +101,25 @@ int execve(const char *path, char *const argv[], char *const envp[]) {
   sp = sz;
   stackbase = sp - PAGE_SIZE;
 
-  sp -= 128;
+  sp -= 512;
 
+  // push argvs to stack.
   argc = 0;
   if (argv) {
-    for (; argv[argc]; argc++) {
-      if (argc > 6)
-        goto bad;
-      sp -= strlen(argv[argc]) + 1;
+    while (argv[argc]) {
+      argc++;
+    }
+    if (argc > 6)
+      goto bad;
+    for (int i = argc - 1; i >= 0; i--) {
+      sp -= strlen(argv[i]) + 1;
       sp = ROUNDDOWN(sp, 16);
       if (sp < stackbase)
         goto bad;
-      if (copyout(pgdir, (void *)sp, argv[argc], strlen(argv[argc]) + 1) < 0) {
+      if (copyout(pgdir, (void *)sp, argv[i], strlen(argv[i]) + 1) < 0) {
         goto bad;
       }
-      ustack[argc] = sp;
+      ustack[i] = sp;
     }
   }
   ustack[argc] = 0;
@@ -139,9 +130,6 @@ int execve(const char *path, char *const argv[], char *const envp[]) {
     goto bad;
   if (copyout(pgdir, (void *)sp, (char *)ustack, (argc + 1) * sizeof(u64)) < 0)
     goto bad;
-
-  p->ucontext->x[0] = (u64)argc;
-  p->ucontext->x[1] = sp;
 
   sp -= 8;
   u64 tmp = 0;
@@ -176,11 +164,4 @@ int execve(const char *path, char *const argv[], char *const envp[]) {
 bad:
   // printk("bad\n");
   PANIC();
-  if (pgdir)
-    free_pgdir(pgdir);
-  if (ip) {
-    inodes.unlock(ip);
-    inodes.put(&ctx, ip);
-  }
-  return -1;
 }

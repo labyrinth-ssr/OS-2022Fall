@@ -105,6 +105,14 @@ void console_intr(char (*getc)()) {
         consputc(BACKSPACE);
       }
       break;
+    case C('C'):
+      if (thisproc()->pid > 2) {
+        ASSERT(kill(thisproc()->pid) == 0);
+      }
+      uart_put_char('^');
+      uart_put_char('C');
+      input.r = input.w;
+      break;
     default:
       // make sure buf has enough space
       if (c != 0 && input.e - input.r < INPUT_BUF) {
